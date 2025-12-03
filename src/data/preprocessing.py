@@ -12,13 +12,32 @@ import re
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
+# 최적화 모듈 import
+try:
+    import sys
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from utils.optimization import (
+        preprocess_text_with_stopwords,
+        CHUNK_SIZE,
+        CHUNK_OVERLAP,
+        KOREAN_SEPARATORS
+    )
+    OPTIMIZATION_AVAILABLE = True
+except ImportError:
+    print("⚠️ 최적화 모듈을 불러올 수 없습니다. 기본 전처리만 사용합니다.")
+    OPTIMIZATION_AVAILABLE = False
+    CHUNK_SIZE = 1000
+    CHUNK_OVERLAP = 200
+    KOREAN_SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
 
-def clean_text(text: str) -> str:
+
+def clean_text(text: str, remove_stopwords: bool = False) -> str:
     """
     텍스트 정제: 불필요한 공백, 특수문자 제거
     
     Args:
         text: 원본 텍스트
+        remove_stopwords: True면 불용어 제거 수행
         
     Returns:
         정제된 텍스트
@@ -34,6 +53,10 @@ def clean_text(text: str) -> str:
     
     # 앞뒤 공백 제거
     text = text.strip()
+    
+    # 불용어 제거 (옵션)
+    if remove_stopwords and OPTIMIZATION_AVAILABLE:
+        text = preprocess_text_with_stopwords(text)
     
     return text
 
@@ -83,9 +106,10 @@ def load_json_file(file_path: str) -> Dict[str, Any]:
 
 def load_and_preprocess_data(
     file_path: str,
-    chunk_size: int = 1000,
-    chunk_overlap: int = 200,
-    data_type: str = "source"  # "source" 또는 "labeled"
+    chunk_size: int = None,  # None이면 최적화된 값 사용
+    chunk_overlap: int = None,  # None이면 최적화된 값 사용
+    data_type: str = "source",  # "source" 또는 "labeled"
+    remove_stopwords: bool = False  # 불용어 제거 여부
 ) -> List[Document]:
     """
     원천 데이터(또는 라벨링 데이터)를 로드하고 LangChain Document 객체로 변환
@@ -101,12 +125,22 @@ def load_and_preprocess_data(
     """
     documents = []
     
-    # 텍스트 분할기 초기화
+    # 최적화된 청크 설정 적용
+    if chunk_size is None:
+        chunk_size = CHUNK_SIZE
+    if chunk_overlap is None:
+        chunk_overlap = CHUNK_OVERLAP
+    
+    print(f"📐 청크 설정: size={chunk_size}, overlap={chunk_overlap}")
+    if remove_stopwords:
+        print(f"🗑️ 불용어 제거: 활성화")
+    
+    # 텍스트 분할기 초기화 (최적화된 구분자 사용)
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         length_function=len,
-        separators=["\n\n", "\n", ". ", " ", ""]
+        separators=KOREAN_SEPARATORS if OPTIMIZATION_AVAILABLE else ["\n\n", "\n", ". ", " ", ""]
     )
     
     # 파일 경로 처리
@@ -129,10 +163,10 @@ def load_and_preprocess_data(
         
         if data_type == "source":
             # 원천 데이터 처리 (TS_말뭉치데이터)
-            documents.extend(_process_source_data(data, text_splitter, str(file)))
+            documents.extend(_process_source_data(data, text_splitter, str(file), remove_stopwords))
         elif data_type == "labeled":
             # 라벨링 데이터 처리 (TL_질의응답데이터)
-            documents.extend(_process_labeled_data(data, text_splitter, str(file)))
+            documents.extend(_process_labeled_data(data, text_splitter, str(file), remove_stopwords))
     
     print(f"총 {len(documents)}개의 Document 청크가 생성되었습니다.")
     return documents
@@ -141,7 +175,8 @@ def load_and_preprocess_data(
 def _process_source_data(
     data: Dict[str, Any],
     text_splitter: RecursiveCharacterTextSplitter,
-    file_path: str
+    file_path: str,
+    remove_stopwords: bool = False
 ) -> List[Document]:
     """
     원천 데이터(TS_말뭉치데이터) 처리
@@ -162,7 +197,7 @@ def _process_source_data(
     if not disease_text:
         return documents
     
-    disease_text = clean_text(disease_text)
+    disease_text = clean_text(disease_text, remove_stopwords=remove_stopwords)
     
     # 응급도 키워드 감지 (지침 5: 응급도 판단 정확도 개선)
     urgency_level = _detect_urgency_from_text(disease_text)
@@ -236,7 +271,8 @@ def _detect_urgency_from_text(text: str) -> str:
 def _process_labeled_data(
     data: Dict[str, Any],
     text_splitter: RecursiveCharacterTextSplitter,
-    file_path: str
+    file_path: str,
+    remove_stopwords: bool = False
 ) -> List[Document]:
     """
     라벨링 데이터(TL_질의응답데이터) 처리
@@ -260,11 +296,11 @@ def _process_labeled_data(
         return documents
     
     # 답변에서 정형화된 관리 지침 문구 제거 (지침 4.2: 후처리)
-    output_text = clean_text(qa.get('output', ''))
+    output_text = clean_text(qa.get('output', ''), remove_stopwords=remove_stopwords)
     output_text = _remove_boilerplate_text(output_text)
     
     # QA 쌍을 하나의 컨텍스트로 결합
-    qa_text = f"""질문: {clean_text(qa.get('input', ''))}
+    qa_text = f"""질문: {clean_text(qa.get('input', ''), remove_stopwords=remove_stopwords)}
 
 답변: {output_text}"""
     
@@ -300,8 +336,9 @@ def load_multiple_departments(
     base_path: str,
     departments: List[str] = ["내과", "외과", "안과", "치과", "피부과"],
     data_type: str = "source",
-    chunk_size: int = 1000,
-    chunk_overlap: int = 200
+    chunk_size: int = None,  # None이면 최적화된 값 사용
+    chunk_overlap: int = None,  # None이면 최적화된 값 사용
+    remove_stopwords: bool = False  # 불용어 제거 여부
 ) -> List[Document]:
     """
     여러 진료과 데이터를 일괄 로드
@@ -330,7 +367,8 @@ def load_multiple_departments(
                 dept_path,
                 chunk_size=chunk_size,
                 chunk_overlap=chunk_overlap,
-                data_type=data_type
+                data_type=data_type,
+                remove_stopwords=remove_stopwords
             )
             all_documents.extend(docs)
         else:

@@ -1,6 +1,10 @@
 """
-통합 실행 스크립트
-전체 파이프라인을 한 번에 실행하는 메인 스크립트
+통합 실행 스크립트 (최적화 버전)
+- 캐싱 시스템 (Vector DB + pkl)
+- 키워드 추출 (Query Re-writing)
+- 불용어 제거
+- 청크 사이즈 최적화 (512 토큰)
+- 상대 경로 관리
 """
 
 import os
@@ -13,6 +17,15 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 from data.preprocessing import load_and_preprocess_data, load_multiple_departments
 from rag.pipeline import setup_rag_pipeline, query_rag
 from agent.workflow import run_agent
+
+# 최적화 모듈 import
+try:
+    from utils.optimization import manage_persistence, get_project_path
+    OPTIMIZATION_ENABLED = True
+    print("✅ 최적화 모듈 로드 완료 (캐싱, 키워드 추출 활성화)")
+except ImportError:
+    OPTIMIZATION_ENABLED = False
+    print("⚠️ 최적화 모듈 없음 - 기본 모드로 실행")
 
 # instruction 추출 함수
 def extract_system_instruction(labeled_documents):
@@ -37,96 +50,186 @@ def extract_system_instruction(labeled_documents):
 
 
 def main():
-    """메인 실행 함수"""
+    """메인 실행 함수 (최적화 버전)"""
+    
+    # 전역 변수 사용 선언
+    global OPTIMIZATION_ENABLED
     
     # 환경 변수 로드
     load_dotenv()
     
     print("="*80)
-    print("반려동물 건강 상담 챗봇 시스템")
+    print("🐾 반려동물 건강 상담 챗봇 시스템 (최적화 버전)")
     print("="*80)
     
     # ========================================================================
-    # 1단계: 데이터 로드 및 전처리
+    # 경로 설정 (상대 경로 사용)
     # ========================================================================
-    print("\n[1단계] 데이터 로드 및 전처리 중...")
-    
-    # 데이터 경로 설정
-    base_data_path = r"c:\LDG_CODES\SKN20\3rd_prj\data\59.반려견 성장 및 질병 관련 말뭉치 데이터\3.개방데이터\1.데이터\Training"
-    source_base_path = os.path.join(base_data_path, "01.원천데이터")
-    labeled_base_path = os.path.join(base_data_path, "02.라벨링데이터")
-    
-    # 원천 데이터 로드 (RAG 지식 베이스용 - disease 텍스트 임베딩)
-    print("\n[1-1] 원천 데이터 로드 중 (RAG 지식 베이스용)...")
-    source_documents = load_multiple_departments(
-        base_path=source_base_path,
-        departments=["내과", "외과", "안과", "치과", "피부과"],
-        data_type="source",
-        chunk_size=1000,
-        chunk_overlap=200
-    )
-    
-    # 라벨링 데이터 로드 (QA 패턴 학습 및 instruction 참고용)
-    print("\n[1-2] 라벨링 데이터 로드 중 (QA 패턴 및 instruction 참고용)...")
-    labeled_documents = load_multiple_departments(
-        base_path=labeled_base_path,
-        departments=["내과", "외과", "안과", "치과", "피부과"],
-        data_type="labeled",
-        chunk_size=1000,
-        chunk_overlap=200
-    )
-    
-    # 두 데이터 합치기 (RAG Vector Store에 모두 포함)
-    all_documents = source_documents + labeled_documents
-    
-    if not all_documents:
-        print("⚠️ 문서를 로드할 수 없습니다. 데이터 경로를 확인하세요.")
-        return
-    
-    print(f"\n✓ 원천 데이터: {len(source_documents)}개 청크")
-    print(f"✓ 라벨링 데이터: {len(labeled_documents)}개 청크")
-    print(f"✓ 총 {len(all_documents)}개의 문서 청크 로드 완료")
-    
-    # 라벨링 데이터에서 instruction 추출 (지침 4.2: System Prompt에 활용)
-    system_instruction = extract_system_instruction(labeled_documents)
-    if system_instruction:
-        print(f"\n✓ System Instruction 추출 완료: {system_instruction[:100]}...")
+    if OPTIMIZATION_ENABLED:
+        # 최적화 모듈의 경로 관리 사용
+        source_base_path = get_project_path(
+            'data', 
+            '59.반려견 성장 및 질병 관련 말뭉치 데이터',
+            '3.개방데이터',
+            '1.데이터',
+            'Training',
+            '01.원천데이터'
+        )
+        persist_dir = get_project_path('data', 'chroma_db')
+        print(f"📂 상대 경로 관리 활성화")
+        print(f"   - 데이터: {source_base_path}")
+        print(f"   - Vector DB: {persist_dir}")
+    else:
+        # 기존 방식 (절대 경로)
+        source_base_path = r"c:\LDG_CODES\SKN20\3rd_prj\data\59.반려견 성장 및 질병 관련 말뭉치 데이터\3.개방데이터\1.데이터\Training\01.원천데이터"
+        persist_dir = "./chroma_db"
     
     # ========================================================================
-    # 2단계: RAG 파이프라인 구축
+    # 1단계: 캐싱 시스템을 통한 RAG 초기화
     # ========================================================================
-    print("\n[2단계] RAG 파이프라인 구축 중...")
-    print("- 원천 데이터: disease 텍스트 기반 임베딩 (지식 베이스)")
-    print("- 라벨링 데이터: QA 쌍 기반 임베딩 (질문 패턴 학습)")
-    print("- 메타데이터: department, urgency, lifeCycle 등 필터링용")
+    print("\n[1단계] RAG 시스템 초기화 중...")
     
-    rag_components = setup_rag_pipeline(
-        documents=all_documents,  # 원천 + 라벨링 데이터 모두 사용
-        embedding_model="text-embedding-3-small",
-        model_name="gpt-4o-mini",
-        persist_directory="./chroma_db",
-        use_existing_vectorstore=False,  # 첫 실행 시 False, 이후 True로 변경 가능
-        k=4
-    )
+    if OPTIMIZATION_ENABLED:
+        print("🚀 최적화 모드: 캐싱 시스템 활성화")
+        print("   - Vector DB 존재 → 즉시 로드 (~5초)")
+        print("   - pkl 존재 → 임베딩만 수행 (~2분)")
+        print("   - 없음 → 전체 재구축 (~8분)")
+        
+        try:
+            rag_result = manage_persistence(
+                data_path=source_base_path,
+                persist_dir=persist_dir,
+                force_rebuild=False  # True로 변경하면 강제 재구축
+            )
+            
+            retriever = rag_result["retriever"]
+            vectorstore = rag_result["vectorstore"]
+            status = rag_result["status"]
+            
+            print(f"\n✅ RAG 시스템 준비 완료 (상태: {status})")
+            
+            # RAG 컴포넌트 구성 (기존 코드 호환)
+            from langchain_openai import ChatOpenAI
+            from langchain_core.prompts import ChatPromptTemplate
+            from langchain_core.output_parsers import StrOutputParser
+            from langchain_core.runnables import RunnablePassthrough
+            
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+            
+            # 간단한 RAG 체인 구성
+            from rag.pipeline import VETERINARY_EXPERT_SYSTEM_PROMPT
+            prompt = ChatPromptTemplate.from_template(VETERINARY_EXPERT_SYSTEM_PROMPT)
+            
+            def format_docs(docs):
+                formatted = []
+                for i, doc in enumerate(docs, 1):
+                    dept = doc.metadata.get('department', '알 수 없음')
+                    title = doc.metadata.get('title', '제목 없음')
+                    formatted.append(f"[문서 {i} - {dept}과]\n{doc.page_content}\n")
+                return "\n".join(formatted)
+            
+            rag_chain = (
+                {"context": retriever | format_docs, "input": RunnablePassthrough()}
+                | prompt
+                | llm
+                | StrOutputParser()
+            )
+            
+            rag_components = {
+                "chain": rag_chain,
+                "retriever": retriever,
+                "vectorstore": vectorstore,
+                "llm": llm
+            }
+            
+        except Exception as e:
+            print(f"⚠️ 최적화 모드 실패: {e}")
+            print("   기본 모드로 전환합니다...")
+            OPTIMIZATION_ENABLED = False
     
-    print("✓ RAG 파이프라인 구축 완료")
+    if not OPTIMIZATION_ENABLED:
+        # 기본 모드: 기존 방식대로 실행
+        print("📊 기본 모드: 데이터 로드 및 전처리")
+        
+        labeled_base_path = source_base_path.replace("01.원천데이터", "02.라벨링데이터")
+        
+        # 원천 데이터 로드 (최적화된 청크 설정 자동 적용)
+        print("\n[1-1] 원천 데이터 로드 중...")
+        source_documents = load_multiple_departments(
+            base_path=source_base_path,
+            departments=["내과", "외과", "안과", "치과", "피부과"],
+            data_type="source",
+            chunk_size=None,  # None이면 최적화된 512 사용
+            chunk_overlap=None,  # None이면 최적화된 80 사용
+            remove_stopwords=True  # 불용어 제거 활성화
+        )
+        
+        # 라벨링 데이터 로드
+        print("\n[1-2] 라벨링 데이터 로드 중...")
+        labeled_documents = load_multiple_departments(
+            base_path=labeled_base_path,
+            departments=["내과", "외과", "안과", "치과", "피부과"],
+            data_type="labeled",
+            chunk_size=None,
+            chunk_overlap=None,
+            remove_stopwords=True
+        )
+        
+        all_documents = source_documents + labeled_documents
+        
+        if not all_documents:
+            print("⚠️ 문서를 로드할 수 없습니다. 데이터 경로를 확인하세요.")
+            return
+        
+        print(f"\n✓ 원천 데이터: {len(source_documents)}개 청크")
+        print(f"✓ 라벨링 데이터: {len(labeled_documents)}개 청크")
+        print(f"✓ 총 {len(all_documents)}개의 문서 청크 로드 완료")
+        
+        # RAG 파이프라인 구축
+        print("\n[2단계] RAG 파이프라인 구축 중...")
+        rag_components = setup_rag_pipeline(
+            documents=all_documents,
+            embedding_model="text-embedding-3-small",
+            model_name="gpt-4o-mini",
+            persist_directory=persist_dir,
+            use_existing_vectorstore=False,
+            k=4
+        )
+        
+        print("✓ RAG 파이프라인 구축 완료")
     
     # ========================================================================
-    # 3단계: RAG 파이프라인 테스트
+    # 2단계: RAG 파이프라인 테스트 (키워드 추출 적용)
     # ========================================================================
-    print("\n[3단계] RAG 파이프라인 테스트...")
+    print("\n[2단계] RAG 파이프라인 테스트...")
     
     test_query = "강아지가 구토를 하고 황달 증상이 있습니다. 어떤 질환일까요?"
     print(f"\n테스트 질문: {test_query}")
     
-    answer = query_rag(rag_components["chain"], test_query)
+    # 키워드 추출 적용 (최적화 모드)
+    if OPTIMIZATION_ENABLED:
+        from utils.optimization import extract_keywords_for_query
+        from langchain_openai import ChatOpenAI
+        
+        llm_temp = ChatOpenAI(model="gpt-4o-mini", temperature=0.0)
+        optimized_query = extract_keywords_for_query(test_query, llm_temp)
+        print(f"🔑 최적화된 쿼리: {optimized_query}")
+        test_query_final = optimized_query
+    else:
+        test_query_final = test_query
+    
+    answer = query_rag(rag_components["chain"], test_query_final)
     print(f"\nRAG 답변:\n{answer}")
     
     # ========================================================================
-    # 4단계: LangGraph Agent 실행 (통합 워크플로우)
+    # 3단계: LangGraph Agent 실행 (최적화 워크플로우)
     # ========================================================================
     print("\n\n" + "="*80)
-    print("[4단계] LangGraph Agent 워크플로우 실행")
+    print("[3단계] LangGraph Agent 워크플로우 실행")
+    print("="*80)
+    print("🔍 키워드 추출: 활성화" if OPTIMIZATION_ENABLED else "")
+    print("🔍 의학적 검수: 활성화 (최대 2회 재검토)")
+    print("📐 최적화된 청크: 512 토큰")
     print("="*80)
     
     # Agent 테스트 케이스 (기대 응급도 포함) - 10개
@@ -227,14 +330,24 @@ def main():
     # 완료
     # ========================================================================
     print("\n\n" + "="*80)
-    print("모든 테스트가 완료되었습니다!")
+    print("✅ 모든 테스트가 완료되었습니다!")
     print("="*80)
     
+    if OPTIMIZATION_ENABLED:
+        print("\n🚀 적용된 최적화:")
+        print("  ✅ 캐싱 시스템 (Vector DB + pkl)")
+        print("  ✅ 키워드 추출 (Query Re-writing)")
+        print("  ✅ 불용어 제거 (KoNLPy)")
+        print("  ✅ 청크 최적화 (512 토큰)")
+        print("  ✅ 의학적 검수 (피드백 루프)")
+        print("  ✅ 상대 경로 관리")
+        print("\n💡 다음 실행 시 Vector DB 캐시 사용으로 ~5초 만에 시작됩니다!")
+    
     print("\n📝 다음 단계:")
-    print("1. 실제 데이터 경로로 변경하여 전체 데이터 로드")
-    print("2. 카카오맵 API 연동하여 실제 병원 검색 구현")
-    print("3. 웹 인터페이스 또는 챗봇 UI 개발")
-    print("4. 사용자 피드백 수집 및 모델 개선")
+    print("1. 카카오맵 API 연동하여 실제 병원 검색 구현")
+    print("2. 웹 인터페이스 또는 챗봇 UI 개발 (Streamlit/Gradio)")
+    print("3. 사용자 피드백 수집 및 모델 개선")
+    print("4. 멀티턴 대화 기능 추가")
 
 
 if __name__ == "__main__":

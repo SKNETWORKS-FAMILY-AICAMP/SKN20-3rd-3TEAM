@@ -18,6 +18,14 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from utils.tools import rag_search_tool, hospital_recommend_tool
 
+# 최적화 모듈 import
+try:
+    from utils.optimization import extract_keywords_for_query
+    OPTIMIZATION_AVAILABLE = True
+except ImportError:
+    print("⚠️ 최적화 모듈을 불러올 수 없습니다. 키워드 추출 기능이 비활성화됩니다.")
+    OPTIMIZATION_AVAILABLE = False
+
 
 # ============================================================================
 # 상태 정의 (State Schema)
@@ -29,10 +37,15 @@ class AgentState(TypedDict):
     user_query: str  # 사용자 원본 질문
     symptoms_analysis: str  # 증상 분석 결과
     urgency_level: str  # 응급도 수준 ("높음", "보통", "낮음")
+    triage_reasoning: str  # 응급도 판단 상세 추론 과정
     recommended_department: str  # 추천 진료과
     hospital_list: List[Dict[str, str]]  # 추천 병원 리스트
     final_response: str  # 최종 응답
     next_action: str  # 다음 액션 지시
+    # 의학적 검수 관련 필드
+    review_feedback: str  # 검수 피드백
+    needs_revision: bool  # 수정 필요 여부
+    revision_count: int  # 재검토 횟수 (무한 루프 방지)
 
 
 # ============================================================================
@@ -55,10 +68,19 @@ def analyze_symptom_node(state: AgentState) -> AgentState:
     # 진료과 추론 (키워드 기반)
     department_hint = _infer_department(user_query)
     
-    # RAG 검색 수행 (lifeCycle 정보 포함)
-    search_query = user_query
-    if life_cycle:
-        search_query = f"[{life_cycle}] {user_query}"
+    # 🔑 키워드 추출로 검색 쿼리 최적화 (Query Re-writing)
+    if OPTIMIZATION_AVAILABLE:
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.0)
+        search_query = extract_keywords_for_query(user_query, llm)
+        # lifeCycle 정보 추가
+        if life_cycle:
+            search_query = f"{life_cycle} {search_query}"
+        print(f"[최적화된 검색 쿼리] {search_query}")
+    else:
+        # 최적화 모듈 없을 경우 기본 방식
+        search_query = user_query
+        if life_cycle:
+            search_query = f"[{life_cycle}] {user_query}"
     
     rag_result = rag_search_tool.invoke({
         "query": search_query, 
@@ -133,7 +155,10 @@ def triage_and_decide_node(state: AgentState) -> AgentState:
     
     증상 분석 결과를 바탕으로 응급도를 판단하고 다음 행동을 결정합니다.
     """
-    print("\n[Node 2] 응급도 판단 중...")
+    # 재검토 횟수 확인
+    revision_count = state.get("revision_count", 0)
+    
+    print(f"\n[Node 2] 응급도 판단 중... (재검토 {revision_count}회차)")
     
     symptoms_analysis = state["symptoms_analysis"]
     user_query = state["user_query"]
@@ -219,6 +244,7 @@ def triage_and_decide_node(state: AgentState) -> AgentState:
     # 상태 업데이트
     state["urgency_level"] = urgency
     state["recommended_department"] = department
+    state["triage_reasoning"] = triage_result  # 추론 과정 저장 (검수용)
     state["next_action"] = next_action
     state["messages"].append(AIMessage(content=f"응급도 판단:\n{triage_result}"))
     
@@ -227,13 +253,121 @@ def triage_and_decide_node(state: AgentState) -> AgentState:
     return state
 
 
+def medical_review_node(state: AgentState) -> AgentState:
+    """
+    Node 3: 의학적 검수 (Medical Review)
+    
+    응급도 판단의 정확성을 재검토하고, 누락된 위험 징후를 확인합니다.
+    피드백 루프를 통해 오판을 최소화합니다.
+    """
+    print("\n[Node 3] 의학적 검수 시작...")
+    
+    user_query = state["user_query"]
+    symptoms_analysis = state["symptoms_analysis"]
+    urgency_level = state["urgency_level"]
+    triage_reasoning = state["triage_reasoning"]
+    revision_count = state.get("revision_count", 0)
+    previous_feedback = state.get("review_feedback", "")
+    
+    # LLM을 사용한 의학적 검수
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0.0,  # 일관된 검수를 위해 temperature 0
+        max_tokens=1000
+    )
+    
+    # 검수 프롬프트
+    previous_feedback_section = f"## 이전 검수 피드백\n{previous_feedback}" if previous_feedback else ""
+    
+    review_prompt = f"""당신은 수의학 응급 전문가이자 품질 검수 담당자입니다.
+다음 증상 분석과 응급도 판단을 **비판적으로 재검토**하여 의학적 정확성을 검증하세요.
+
+## 사용자 질문
+{user_query}
+
+## 증상 분석 결과
+{symptoms_analysis}
+
+## 판단된 응급도
+{urgency_level}
+
+## 응급도 판단 추론 과정
+{triage_reasoning}
+
+{previous_feedback_section}
+
+## 검수 기준 (매우 엄격하게 적용)
+
+### 1. 생명 위협 징후 누락 확인
+다음 징후가 질문에 있는데 응급도가 "낮음"이면 **반드시 수정 필요**:
+- 발작, 경련, 의식 저하/혼수
+- 호흡곤란, 청색증, 질식
+- 심한 출혈, 쇼크 증상
+- 복부 급격한 팽만 (위 비틀림 GDV 의심)
+- 급성 중독 의심
+- 40도 이상 고열
+- 심한 탈수 (잇몸 창백, 피부 텐트 테스트 이상)
+
+### 2. 과대평가 확인
+다음 경우 응급도가 "높음"이면 **과대평가 가능성**:
+- 단순 경미한 증상 (가벼운 기침, 경미한 피부 발진 등)
+- 만성적이고 안정적인 증상 (수개월 지속된 변화 없는 증상)
+- 행동학적 문제 (공격성, 분리불안 등)
+
+### 3. 증상-응급도 일관성 검증
+- 복합 증상(구토+황달, 호흡곤란+청색증)이 있는데 응급도 "낮음" → **불일치**
+- 단일 경미 증상(가벼운 눈 충혈)인데 응급도 "높음" → **불일치**
+
+### 4. 연령대(lifeCycle) 고려
+- 자견/노령견은 면역력이 약해 같은 증상도 더 위험할 수 있음
+- 이를 고려했는지 확인
+
+## 검수 결과 출력 형식 (반드시 아래 형식으로만 출력)
+
+**판정**: [승인/수정필요]
+
+**검수 근거**:
+- [구체적인 의학적 근거 3-5줄]
+- [놓친 위험 징후나 과대평가 요소]
+
+**수정 제안** (수정필요 시에만):
+- 제안 응급도: [높음/보통/낮음]
+- 제안 이유: [1-2문장]
+
+**신뢰도**: [높음/중간/낮음] (현재 판단의 의학적 신뢰도)
+"""
+    
+    response = llm.invoke([HumanMessage(content=review_prompt)])
+    review_result = response.content
+    
+    # 검수 결과 파싱
+    needs_revision = "수정필요" in review_result or "수정 필요" in review_result
+    
+    # 상태 업데이트
+    state["review_feedback"] = review_result
+    state["needs_revision"] = needs_revision
+    # 수정 필요할 경우 revision_count 증가
+    if needs_revision:
+        state["revision_count"] = revision_count + 1
+    else:
+        state["revision_count"] = revision_count
+    state["messages"].append(AIMessage(content=f"의학적 검수:\n{review_result}"))
+    
+    if needs_revision:
+        print(f"[Node 3 완료] 검수 결과: 수정 필요 (재검토 횟수: {revision_count})")
+    else:
+        print(f"[Node 3 완료] 검수 결과: 승인")
+    
+    return state
+
+
 def recommend_hospital_node(state: AgentState) -> AgentState:
     """
-    Node 3: 병원 추천
+    Node 4: 병원 추천
     
     응급도와 진료과를 고려하여 적절한 병원을 추천합니다.
     """
-    print("\n[Node 3] 병원 추천 중...")
+    print("\n[Node 4] 병원 추천 중...")
     
     urgency = state["urgency_level"]
     department = state["recommended_department"]
@@ -261,18 +395,18 @@ def recommend_hospital_node(state: AgentState) -> AgentState:
     state["messages"].append(AIMessage(content=f"추천 병원:\n\n{hospital_text}"))
     state["next_action"] = "generate_final_response"
     
-    print(f"[Node 3 완료] {len(hospitals)}개 병원 추천됨")
+    print(f"[Node 4 완료] {len(hospitals)}개 병원 추천됨")
     
     return state
 
 
 def generate_final_response_node(state: AgentState) -> AgentState:
     """
-    Node 4: 최종 응답 생성
+    Node 5: 최종 응답 생성
     
     모든 분석 결과를 종합하여 사용자에게 제공할 최종 응답을 생성합니다.
     """
-    print("\n[Node 4] 최종 응답 생성 중...")
+    print("\n[Node 5] 최종 응답 생성 중...")
     
     llm = ChatOpenAI(
         model="gpt-4o-mini",
@@ -312,7 +446,7 @@ def generate_final_response_node(state: AgentState) -> AgentState:
     state["messages"].append(AIMessage(content=final_response))
     state["next_action"] = "end"
     
-    print(f"[Node 4 완료] 최종 응답 생성됨")
+    print(f"[Node 5 완료] 최종 응답 생성됨")
     
     return state
 
@@ -321,9 +455,40 @@ def generate_final_response_node(state: AgentState) -> AgentState:
 # Conditional Edge 함수
 # ============================================================================
 
+def needs_medical_revision(state: AgentState) -> Literal["triage_and_decide", "recommend_hospital", "generate_final_response"]:
+    """
+    조건부 엣지: 검수 결과에 따라 재검토 여부 결정
+    
+    - needs_revision=True이고 revision_count < 2: 응급도 판단 노드로 복귀
+    - needs_revision=False: 다음 단계 진행
+    - revision_count >= 2: 강제 진행 (무한 루프 방지)
+    """
+    needs_revision = state.get("needs_revision", False)
+    revision_count = state.get("revision_count", 0)
+    urgency = state.get("urgency_level", "보통")
+    
+    # 무한 루프 방지: 최대 2번까지만 재검토
+    if needs_revision and revision_count < 2:
+        print(f"[조건부 엣지 - 검수] 수정 필요 → 응급도 판단 재실행 ({revision_count + 1}회차)")
+        # revision_count는 triage_and_decide_node에서 증가됨
+        return "triage_and_decide"
+    
+    # 검수 통과 또는 최대 재검토 횟수 도달
+    if revision_count >= 2:
+        print(f"[조건부 엣지 - 검수] 최대 재검토 횟수 도달 → 현재 판단으로 진행")
+    
+    # 응급도에 따라 병원 추천 여부 결정
+    if urgency in ["높음", "보통"]:
+        print(f"[조건부 엣지 - 병원] 응급도 '{urgency}' → 병원 추천 수행")
+        return "recommend_hospital"
+    else:
+        print(f"[조건부 엣지 - 병원] 응급도 '{urgency}' → 병원 추천 생략")
+        return "generate_final_response"
+
+
 def should_recommend_hospital(state: AgentState) -> Literal["recommend_hospital", "generate_final_response"]:
     """
-    조건부 엣지: 응급도에 따라 병원 추천 여부 결정
+    조건부 엣지: 응급도에 따라 병원 추천 여부 결정 (검수 통과 후)
     
     - 응급도 '높음' 또는 '보통': 병원 추천 수행
     - 응급도 '낮음': 병원 추천 생략하고 최종 응답 생성
@@ -355,6 +520,7 @@ def create_pet_health_agent() -> StateGraph:
     # Node 추가
     workflow.add_node("analyze_symptom", analyze_symptom_node)
     workflow.add_node("triage_and_decide", triage_and_decide_node)
+    workflow.add_node("medical_review", medical_review_node)  # 의학적 검수 노드 추가
     workflow.add_node("recommend_hospital", recommend_hospital_node)
     workflow.add_node("generate_final_response", generate_final_response_node)
     
@@ -365,13 +531,17 @@ def create_pet_health_agent() -> StateGraph:
     # 증상 분석 → 응급도 판단
     workflow.add_edge("analyze_symptom", "triage_and_decide")
     
-    # 응급도 판단 → 조건부 분기 (병원 추천 or 최종 응답)
+    # 응급도 판단 → 의학적 검수 (피드백 루프 포함)
+    workflow.add_edge("triage_and_decide", "medical_review")
+    
+    # 의학적 검수 → 조건부 분기 (재검토 or 다음 단계)
     workflow.add_conditional_edges(
-        "triage_and_decide",
-        should_recommend_hospital,
+        "medical_review",
+        needs_medical_revision,
         {
-            "recommend_hospital": "recommend_hospital",
-            "generate_final_response": "generate_final_response"
+            "triage_and_decide": "triage_and_decide",  # 피드백 루프: 재검토
+            "recommend_hospital": "recommend_hospital",  # 검수 통과 + 응급도 높음/보통
+            "generate_final_response": "generate_final_response"  # 검수 통과 + 응급도 낮음
         }
     )
     
@@ -414,10 +584,14 @@ def run_agent(user_query: str, config: Dict[str, Any] = None) -> Dict[str, Any]:
         "user_query": user_query,
         "symptoms_analysis": "",
         "urgency_level": "",
+        "triage_reasoning": "",
         "recommended_department": "",
         "hospital_list": [],
         "final_response": "",
-        "next_action": ""
+        "next_action": "",
+        "review_feedback": "",
+        "needs_revision": False,
+        "revision_count": 0
     }
     
     # 설정
