@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>카카오 지도 API 사용 예시</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Malgun Gothic', sans-serif;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        
+        #map {
+            width: 100%;
+            height: 600px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+        }
+        
+        .info-panel {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .button-group {
+            margin-top: 15px;
+            text-align: center;
+        }
+        
+        button {
+            margin: 5px;
+            padding: 10px 20px;
+            font-size: 14px;
+            background-color: #FEE500;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        button:hover {
+            background-color: #FDD835;
+        }
+        
+        .search-box {
+            margin-top: 15px;
+            text-align: center;
+        }
+        
+        input[type="text"] {
+            padding: 10px;
+            width: 300px;
+            font-size: 14px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        #result {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: white;
+            border-radius: 5px;
+            min-height: 50px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🗺️ 카카오 지도 API 예시 (.env 사용)</h1>
+    
+    <div id="map"></div>
+    
+    <div class="info-panel">
+        <h3>📍 현재 위치 정보</h3>
+        <div id="result">
+            지도를 클릭하거나 버튼을 눌러 위치를 확인하세요.
+        </div>
+    </div>
+    
+    <div class="button-group">
+        <button onclick="setCenter()">서울시청으로 이동</button>
+        <button onclick="setBounds()">한국 전체 보기</button>
+        <button onclick="setZoomIn()">확대</button>
+        <button onclick="setZoomOut()">축소</button>
+        <button onclick="getCurrentLocation()">내 위치 찾기</button>
+    </div>
+    
+    <div class="search-box">
+        <input type="text" id="keyword" placeholder="장소를 검색하세요 (예: 강남역)" onkeypress="if(event.keyCode==13) searchPlaces()">
+        <button onclick="searchPlaces()">검색</button>
+    </div>
+
+    <!-- 카카오 지도 API 스크립트 - .env 파일의 API 키 사용 -->
+    <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey={{ api_key }}&libraries=services&autoload=false"></script>
+    
+    <script>
+        // API 키 확인
+        console.log('API Key in HTML: {{ api_key }}');
+        
+        // ✅ .env 파일의 KAKAO_MAP_API_KEY가 적용되었습니다!
+        
+        var map, marker;
+        
+        // SDK 로드 대기
+        function initMap() {
+            if (typeof kakao === 'undefined' || typeof kakao.maps === 'undefined') {
+                setTimeout(initMap, 100);
+                return;
+            }
+            
+            kakao.maps.load(function() {
+            var mapContainer = document.getElementById('map');
+            var mapOption = {
+                center: new kakao.maps.LatLng(37.5665, 126.9780), // 서울시청 좌표
+                level: 3 // 지도 확대 레벨
+            };
+
+            // 지도 생성
+            map = new kakao.maps.Map(mapContainer, mapOption);
+            
+            // 마커 생성
+            marker = new kakao.maps.Marker({
+                position: map.getCenter()
+            });
+            marker.setMap(map);
+            
+            // 지도 클릭 이벤트
+            kakao.maps.event.addListener(map, 'click', function(mouseEvent) {
+                var latlng = mouseEvent.latLng;
+                
+                // 마커 위치 변경
+                marker.setPosition(latlng);
+                
+                // 좌표를 주소로 변환
+                var geocoder = new kakao.maps.services.Geocoder();
+                geocoder.coord2Address(latlng.getLng(), latlng.getLat(), function(result, status) {
+                    if (status === kakao.maps.services.Status.OK) {
+                        var address = result[0].address.address_name;
+                        document.getElementById('result').innerHTML = 
+                            `<strong>클릭한 위치:</strong><br>
+                            좌표: ${latlng.getLat().toFixed(6)}, ${latlng.getLng().toFixed(6)}<br>
+                            주소: ${address}`;
+                    }
+                });
+            });
+            
+                // 초기 위치 정보 표시
+                document.getElementById('result').innerHTML = 
+                    '<strong>서울특별시청</strong><br>좌표: 37.5665, 126.9780';
+            });
+        }
+        
+        // 페이지 로드 완료 후 지도 초기화
+        window.onload = initMap;
+        
+        // 서울시청으로 이동
+        function setCenter() {
+            var moveLatLon = new kakao.maps.LatLng(37.5665, 126.9780);
+            map.setCenter(moveLatLon);
+            marker.setPosition(moveLatLon);
+            document.getElementById('result').innerHTML = 
+                '<strong>서울특별시청</strong><br>좌표: 37.5665, 126.9780';
+        }
+        
+        // 한국 전체 보기
+        function setBounds() {
+            var bounds = new kakao.maps.LatLngBounds(
+                new kakao.maps.LatLng(33.0, 124.0),
+                new kakao.maps.LatLng(38.6, 131.9)
+            );
+            map.setBounds(bounds);
+        }
+        
+        // 확대
+        function setZoomIn() {
+            var level = map.getLevel();
+            map.setLevel(level - 1);
+        }
+        
+        // 축소
+        function setZoomOut() {
+            var level = map.getLevel();
+            map.setLevel(level + 1);
+        }
+        
+        // 내 위치 찾기
+        function getCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    var lat = position.coords.latitude;
+                    var lon = position.coords.longitude;
+                    var locPosition = new kakao.maps.LatLng(lat, lon);
+                    
+                    map.setCenter(locPosition);
+                    marker.setPosition(locPosition);
+                    
+                    document.getElementById('result').innerHTML = 
+                        `<strong>현재 위치</strong><br>좌표: ${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+                });
+            } else {
+                alert('이 브라우저는 위치 정보를 지원하지 않습니다.');
+            }
+        }
+        
+        // 장소 검색
+        function searchPlaces() {
+            var keyword = document.getElementById('keyword').value;
+            
+            if (!keyword.trim()) {
+                alert('검색어를 입력하세요!');
+                return;
+            }
+            
+            var ps = new kakao.maps.services.Places();
+            ps.keywordSearch(keyword, placesSearchCB);
+        }
+        
+        // 검색 결과 콜백
+        function placesSearchCB(data, status, pagination) {
+            if (status === kakao.maps.services.Status.OK) {
+                var bounds = new kakao.maps.LatLngBounds();
+                
+                // 첫 번째 결과로 이동
+                var place = data[0];
+                var coords = new kakao.maps.LatLng(place.y, place.x);
+                
+                marker.setPosition(coords);
+                map.setCenter(coords);
+                
+                document.getElementById('result').innerHTML = 
+                    `<strong>${place.place_name}</strong><br>
+                    주소: ${place.address_name}<br>
+                    좌표: ${place.y}, ${place.x}`;
+                    
+            } else if (status === kakao.maps.services.Status.ZERO_RESULT) {
+                alert('검색 결과가 없습니다.');
+            } else if (status === kakao.maps.services.Status.ERROR) {
+                alert('검색 중 오류가 발생했습니다.');
+            }
+        }
+    </script>
+</body>
+</html>
