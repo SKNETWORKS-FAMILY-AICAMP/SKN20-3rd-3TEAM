@@ -39,9 +39,10 @@ class AgentState(TypedDict):
     urgency_level: str  # 응급도 수준 ("높음", "보통", "낮음")
     triage_reasoning: str  # 응급도 판단 상세 추론 과정
     recommended_department: str  # 추천 진료과
-    hospital_list: List[Dict[str, str]]  # 추천 병원 리스트
+    hospital_list: str  # 추천 병원 리스트 (포맷된 문자열)
     final_response: str  # 최종 응답
     next_action: str  # 다음 액션 지시
+    user_location: str  # 사용자 위치 (예: "서울시 강남구 역삼동")
     # 의학적 검수 관련 필드
     review_feedback: str  # 검수 피드백
     needs_revision: bool  # 수정 필요 여부
@@ -372,30 +373,23 @@ def recommend_hospital_node(state: AgentState) -> AgentState:
     urgency = state["urgency_level"]
     department = state["recommended_department"]
     
-    # 병원 검색 (Tool 호출)
-    hospitals = hospital_recommend_tool.invoke({
-        "location": "서울",  # TODO: 사용자 위치 정보 사용
-        "department": department,
-        "urgency": urgency
-    })
+    # 사용자에게 위치 입력 요청 (실제로는 Streamlit이나 대화에서 수집)
+    # TODO: 실제 구현에서는 state에서 location을 가져오거나, 
+    # 별도의 conditional edge로 위치 입력을 요청하는 노드를 추가해야 함
+    location_query = state.get("user_location", "서울시 강남구")
     
-    # 상태 업데이트
-    state["hospital_list"] = hospitals
+    print(f"[병원 검색] 위치: {location_query}, 응급도: {urgency}")
     
-    # 병원 리스트 포맷팅
-    hospital_text = "\n\n".join([
-        f"**{h['name']}**\n"
-        f"- 주소: {h['address']}\n"
-        f"- 전화: {h['phone']}\n"
-        f"- 24시간: {h['24hours']}\n"
-        f"- 거리: {h['distance']}"
-        for h in hospitals
-    ])
+    # 병원 검색 (Tool 호출) - 카카오 지도 API 사용
+    hospital_result = hospital_recommend_tool.invoke(location_query)
     
-    state["messages"].append(AIMessage(content=f"추천 병원:\n\n{hospital_text}"))
+    # 상태 업데이트 (hospital_recommend_tool은 이제 포맷된 문자열 반환)
+    state["hospital_list"] = hospital_result  # 포맷된 문자열로 저장
+    
+    state["messages"].append(AIMessage(content=f"추천 병원:\n\n{hospital_result}"))
     state["next_action"] = "generate_final_response"
     
-    print(f"[Node 4 완료] {len(hospitals)}개 병원 추천됨")
+    print(f"[Node 4 완료] 병원 추천 완료")
     
     return state
 
@@ -427,7 +421,7 @@ def generate_final_response_node(state: AgentState) -> AgentState:
 추천 진료과: {state['recommended_department']}
 
 추천 병원:
-{state.get('hospital_list', [])}
+{state.get('hospital_list', '병원 정보 없음')}
 
 답변 구조:
 1. 증상 요약 및 공감
@@ -564,12 +558,13 @@ def create_pet_health_agent() -> StateGraph:
 # 실행 함수
 # ============================================================================
 
-def run_agent(user_query: str, config: Dict[str, Any] = None) -> Dict[str, Any]:
+def run_agent(user_query: str, user_location: str = None, config: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Agent 실행
     
     Args:
         user_query: 사용자 질문
+        user_location: 사용자 위치 (예: "서울시 강남구 역삼동")
         config: LangGraph 설정 (thread_id 등)
         
     Returns:
@@ -586,12 +581,13 @@ def run_agent(user_query: str, config: Dict[str, Any] = None) -> Dict[str, Any]:
         "urgency_level": "",
         "triage_reasoning": "",
         "recommended_department": "",
-        "hospital_list": [],
+        "hospital_list": "",  # 이제 문자열로 저장됨
         "final_response": "",
         "next_action": "",
         "review_feedback": "",
         "needs_revision": False,
-        "revision_count": 0
+        "revision_count": 0,
+        "user_location": user_location or "서울시 강남구"  # 사용자 위치 추가
     }
     
     # 설정

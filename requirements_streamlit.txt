@@ -1,0 +1,4 @@
+# Streamlit 애플리케이션 추가 패키지
+streamlit>=1.28.0
+streamlit-geolocation>=0.0.5  # GPS 위치 요청용
+plotly>=5.17.0  # 시각화용 (선택 사항)
