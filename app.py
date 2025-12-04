@@ -25,6 +25,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.embeddings import get_embedding_model, load_vectorstore
 from src.retrieval import create_retriever
 from src.pipeline import LangGraphRAGPipeline
+from src.kakao_map import HospitalMapper
+from src.hospital_web_search import (
+    HospitalWebSearcher,
+    extract_hospital_name_from_question,
+    extract_location_from_question
+)
 
 # 로거 설정
 logger = get_logger(__name__)
@@ -175,6 +181,25 @@ def initialize_session_state():
     
     if "show_debug_info" not in st.session_state:
         st.session_state.show_debug_info = False
+    
+    # 카카오맵 상태
+    if "show_hospital_map" not in st.session_state:
+        st.session_state.show_hospital_map = False
+    
+    if "hospital_mapper" not in st.session_state:
+        try:
+            st.session_state.hospital_mapper = HospitalMapper()
+        except Exception as e:
+            logger.warning(f"HospitalMapper initialization warning: {str(e)}")
+            st.session_state.hospital_mapper = None
+    
+    # 병원 웹 검색기
+    if "hospital_searcher" not in st.session_state:
+        st.session_state.hospital_searcher = HospitalWebSearcher()
+    
+    # 웹 검색으로 찾은 병원 정보
+    if "searched_hospital_info" not in st.session_state:
+        st.session_state.searched_hospital_info = None
 
 
 # ==================== 채팅 표시 함수 ====================
@@ -285,6 +310,20 @@ def handle_question_submission():
         st.error("❌ RAG 시스템이 준비되지 않았습니다.")
         return
     
+    # 질문에서 병원 이름과 위치 추출
+    hospital_name = extract_hospital_name_from_question(question)
+    location = extract_location_from_question(question)
+    
+    # 병원 정보 검색 (질문에 병원 이름이 있을 경우)
+    hospital_info = None
+    if hospital_name:
+        with st.spinner(f"🔍 {hospital_name} 정보를 검색 중입니다..."):
+            hospital_info = st.session_state.hospital_searcher.search_hospital_info(
+                hospital_name, location
+            )
+            if hospital_info.get('found'):
+                st.session_state.searched_hospital_info = hospital_info
+    
     # 대화 기록에 사용자 질문 추가
     st.session_state.chat_history.append({
         "role": "user",
@@ -306,7 +345,8 @@ def handle_question_submission():
             "document_scores": result.get('document_scores', []),
             "grade_results": result.get('grade_results', []),
             "web_search_needed": result.get('web_search_needed', 'No')
-        }
+        },
+        "hospital_info": hospital_info
     })
     
     # 입력 필드 초기화
@@ -413,6 +453,100 @@ def display_statistics():
         st.metric("🌐 웹 검색 사용 횟수", web_search_count)
 
 
+# ==================== 카카오맵 표시 ====================
+
+def display_hospital_map(hospitals: List[Dict] = None, show_searched: bool = True):
+    """
+    병원 정보를 카카오맵으로 표시
+    
+    Args:
+        hospitals: 병원 정보 리스트
+        show_searched: 검색된 병원 정보 표시 여부
+    """
+    if st.session_state.hospital_mapper is None:
+        st.warning("⚠️ 카카오맵 API 키가 설정되지 않았습니다.")
+        return
+    
+    try:
+        # 첫 번째 탭: 검색된 병원 정보
+        if show_searched and st.session_state.searched_hospital_info:
+            tab1, tab2 = st.tabs(["🔍 검색 결과", "📍 전체 병원"])
+            
+            with tab1:
+                hospital_info = st.session_state.searched_hospital_info
+                st.markdown(f"### 🏥 {hospital_info['name']}")
+                
+                if hospital_info.get('address'):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.info(f"📍 **주소**: {hospital_info['address']}")
+                    with col2:
+                        if hospital_info.get('phone'):
+                            st.info(f"📞 **전화**: {hospital_info['phone']}")
+                        else:
+                            st.info("📞 **전화**: 정보 없음")
+                    
+                    # 검색된 주소로 맵 표시
+                    searched_hospital = {
+                        'name': hospital_info['name'],
+                        'address': hospital_info['address'],
+                        'phone': hospital_info.get('phone', ''),
+                        'lat': None,
+                        'lng': None
+                    }
+                else:
+                    st.warning("⚠️ 주소 정보를 찾을 수 없습니다. 전체 병원 목록을 확인해주세요.")
+            
+            with tab2:
+                _display_all_hospitals(hospitals)
+        else:
+            _display_all_hospitals(hospitals)
+        
+    except Exception as e:
+        st.error(f"❌ 카카오맵 표시 오류: {str(e)}")
+        logger.error(f"Hospital map display error: {str(e)}")
+
+
+def _display_all_hospitals(hospitals: List[Dict] = None):
+    """
+    전체 병원 목록 표시 (헬퍼 함수)
+    
+    Args:
+        hospitals: 병원 정보 리스트
+    """
+    if hospitals is None:
+        # CSV에서 병원 정보 로드
+        hospital_csv_path = Path(__file__).parent / "data" / "raw" / "hospital" / "서울시_동물병원_인허가_정보.json"
+        if not hospital_csv_path.exists():
+            st.error(f"❌ 병원 데이터 파일을 찾을 수 없습니다: {hospital_csv_path}")
+            return
+        
+        hospitals_data = st.session_state.hospital_mapper.load_hospitals_from_csv(str(hospital_csv_path))
+        hospitals = [st.session_state.hospital_mapper.get_hospital_info(h) for h in hospitals_data]
+    
+    if not hospitals:
+        st.warning("⚠️ 표시할 병원 정보가 없습니다.")
+        return
+    
+    st.subheader(f"🗺️ 동물병원 지도 ({len(hospitals)}개)")
+    
+    # 카카오맵 HTML 생성 및 표시
+    map_html = st.session_state.hospital_mapper.create_streamlit_html_component(hospitals)
+    st.components.v1.html(map_html, height=700)
+    
+    # 병원 목록 표시
+    with st.expander(f"📋 병원 목록 ({len(hospitals)}개)", expanded=False):
+        for i, hospital in enumerate(hospitals[:20]):  # 처음 20개만 표시
+            with st.container():
+                col1, col2, col3 = st.columns([2, 2, 1])
+                with col1:
+                    st.markdown(f"**{i+1}. {hospital['name']}**")
+                with col2:
+                    st.caption(hospital['address'][:40] + "..." if len(hospital['address']) > 40 else hospital['address'])
+                with col3:
+                    st.caption(hospital['phone'] if hospital['phone'] else "정보 없음")
+
+
 # ==================== 디버그 정보 표시 ====================
 
 def display_debug_info(message: Dict):
@@ -510,6 +644,15 @@ def main():
             use_container_width=True,
             on_click=handle_question_submission
         )
+    
+    # 카카오맵 표시 버튼
+    st.divider()
+    if st.button("🗺️ 동물병원 위치 지도 보기", use_container_width=True):
+        st.session_state.show_hospital_map = not st.session_state.show_hospital_map
+    
+    # 카카오맵 표시
+    if st.session_state.show_hospital_map:
+        display_hospital_map()
     
     # 디버그 정보 표시 (마지막 메시지)
     if st.session_state.show_debug_info and st.session_state.chat_history:

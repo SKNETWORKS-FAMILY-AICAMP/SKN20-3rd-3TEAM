@@ -13,5 +13,6 @@ scikit-learn>=1.3.0           # Cosine similarity 계산용
 sentence-transformers>=2.2.0  # HuggingFace embeddings 사용 시 (선택사항)
 tavily-python>=0.3.0          # Tavily 웹 검색 API
 streamlit>=1.28.0             # Streamlit 웹 애플리케이션 프레임워크
-
+pandas>=1.5.0                 # 데이터 처리 (CSV)
+requests>=2.31.0              # HTTP 요청 (웹 검색)
 

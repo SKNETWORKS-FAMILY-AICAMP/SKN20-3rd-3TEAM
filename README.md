@@ -32,12 +32,16 @@ streamlit run app_advanced.py
 │   └── config.toml                 # Streamlit 설정
 ├── QUICKSTART.md                   # 🚀 5분 시작 가이드
 ├── STREAMLIT_GUIDE.md              # 📖 상세 사용 설명서
+├── KAKAO_MAP_QUICKSTART.md         # 🗺️ 카카오맵 빠른 시작
+├── KAKAO_MAP_GUIDE.md              # 🗺️ 카카오맵 상세 가이드
 ├── src/
 │   ├── pipeline.py                 # LangGraph CRAG 파이프라인
 │   ├── retrieval.py                # Retriever (Top-K=5)
 │   ├── embeddings.py               # Embedding 모델 관리
 │   ├── ingestion.py                # 데이터 로딩
 │   ├── chunking.py                 # 문서 분할
+│   ├── kakao_map.py                # 🗺️ 카카오맵 모듈 (신규)
+│   ├── hospital_web_search.py      # 🗺️ 병원 웹 검색 모듈 (신규)
 │   └── ...
 ├── chroma_db/                      # 벡터 DB (사전 생성됨)
 ├── requirements.txt                # 필수 패키지 목록
@@ -58,6 +62,12 @@ streamlit run app_advanced.py
 - 🐛 디버그 정보 보기 (Similarity Score, 관련성 판정, 웹 검색 여부)
 - 📊 대화 통계 및 성능 모니터링
 - 💾 세션 상태 자동 유지
+
+### 🗺️ 카카오맵 병원 위치 표시 (신규!)
+- **전체 병원 지도**: CSV에서 1,000+ 서울시 동물병원 시각화
+- **병원 검색**: 질문에서 병원명 자동 인식 및 웹 검색
+- **인터랙티브 지도**: 마커 클릭으로 상세 정보 확인
+- **병원 목록**: 주소, 전화번호 등 정보 표시
 
 ### ⚙️ 고급 기능 (app_advanced.py)
 - 🎚️ 설정 프리셋 (Fast, Balanced, Accurate, Creative)
