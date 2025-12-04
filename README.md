@@ -1,276 +1,495 @@
-# 🏥 RAG 시스템 프로젝트 (Streamlit 웹 애플리케이션)
+# 🐾 반려동물 의료 RAG 기반 멀티채널 LLM 서비스
 
-의료 데이터를 기반으로 한 **LangGraph CRAG (Corrective RAG) 시스템**입니다.  
-**Streamlit 웹 기반 인터페이스**로 쉽고 편리하게 사용할 수 있습니다.
+반려동물 전문 의료 QA 및 동물병원 위치 안내를 제공하는 **Retrieval-Augmented Generation (RAG)** 기반 멀티채널 LLM 서비스입니다.
 
-## 🚀 빠른 시작
+## 📋 목차
+
+- [개요](#개요)
+- [주요 기능](#주요-기능)
+- [시스템 아키텍처](#시스템-아키텍처)
+- [빠른 시작](#빠른-시작)
+- [프로젝트 구조](#프로젝트-구조)
+- [핵심 모듈](#핵심-모듈)
+- [확장 가이드](#확장-가이드)
+- [테스트](#테스트)
+
+---
+
+## 개요
+
+이 프로젝트는 **공통 기준 코드(Foundation)**로 설계되었으며, 모든 팀원이 각자의 역할에 맞춰 확장하고 고도화할 수 있는 구조를 제공합니다.
+
+### 주요 특징
+
+✅ **모듈식 아키텍처**: 각 모듈이 독립적으로 개발/테스트 가능  
+✅ **LangGraph 기반**: CRAG(Corrective RAG) 파이프라인 구현  
+✅ **다중 검색 전략**: 벡터 검색 + 웹 검색 폴백 메커니즘  
+✅ **의도 기반 라우팅**: 질문 분류에 따른 최적 처리 경로  
+✅ **Streamlit UI**: 즉시 실행 가능한 웹 인터페이스  
+
+---
+
+## 주요 기능
+
+### 1️⃣ 의도 분류 (Intent Classification)
+- **QuestionClassifier**: 사용자 질문을 4가지 카테고리로 분류
+  - `medical`: 의료/건강 관련
+  - `hospital`: 병원 정보/위치
+  - `general`: 일반 정보
+  - `unknown`: 미분류
+
+### 2️⃣ 벡터 검색 시스템
+- **VectorStoreRetriever**: ChromaDB 기반 임베딩 검색
+- 의료 문서 데이터베이스에서 관련성 높은 문서 검색
+
+### 3️⃣ 웹 검색 시스템
+- **HospitalWebSearcher**: 병원 정보 및 위치 검색
+- **GeneralWebSearcher**: 일반 정보 및 백업 검색
+
+### 4️⃣ 병원 위치 매핑
+- **HospitalMapper**: 지역 텍스트 → 좌표 변환
+- 카카오맵 API 기반 병원 정보 통합
+
+### 5️⃣ CRAG 파이프라인
+- **LangGraphRAGPipeline**: 4단계 워크플로우
+  1. 벡터 검색
+  2. 관련성 판단
+  3. 웹 검색 (필요시)
+  4. 답변 생성
+
+### 6️⃣ 오케스트레이션
+- **QueryOrchestrator**: 전체 시스템 조율
+- 의도 분류 → 적절한 처리 경로 선택
+
+---
+
+## 시스템 아키텍처
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Streamlit UI                           │
+│                     (app.py)                                │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────────────────┐
+│           QueryOrchestrator                                 │
+│     (src/orchestrator/query_orchestrator.py)               │
+└────┬──────────┬──────────────┬──────────────┬───────────────┘
+     │          │              │              │
+     ▼          ▼              ▼              ▼
+┌─────────┐ ┌────────┐ ┌──────────┐ ┌─────────────┐
+│Classifier│ │  RAG   │ │ Hospital │ │General Web  │
+│          │ │Pipeline│ │ Mapper   │ │ Searcher    │
+└─────────┘ └────────┘ └──────────┘ └─────────────┘
+     │          │              │              │
+     │          ▼              │              │
+     │    ┌──────────────────────────┐       │
+     │    │  LangGraph Nodes:        │       │
+     │    │ - Retrieval              │       │
+     │    │ - Relevance Evaluation   │       │
+     │    │ - Web Search Fallback    │       │
+     │    │ - Generation             │       │
+     │    └──────────────────────────┘       │
+     │          │                            │
+     ▼          ▼                            ▼
+┌─────────────────────────────────────────────────┐
+│          External Services                      │
+│  - ChromaDB (Vector Store)                      │
+│  - OpenAI Embedding API                         │
+│  - Google/Naver Search API                      │
+│  - Kakao Map API                                │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## 빠른 시작
+
+### 설치
 
 ```bash
-# 1. 패키지 설치
+# 1. 저장소 클론
+git clone <repository-url>
+cd pet-medical-rag
+
+# 2. 가상 환경 생성 (Python 3.10+)
+python -m venv venv
+
+# Windows
+venv\Scripts\activate
+
+# macOS/Linux
+source venv/bin/activate
+
+# 3. 의존성 설치
 pip install -r requirements.txt
 
-# 2. API 키 설정
-# .env 파일 생성 후 OPENAI_API_KEY 추가
+# 4. 환경 변수 설정
+cp .env.example .env
+# .env 파일을 열어 실제 API 키를 입력하세요
+```
 
-# 3. 앱 실행 (기본 버전)
+### 실행
+
+```bash
+# Streamlit 앱 실행
 streamlit run app.py
 
-# 또는 고급 버전 실행
-streamlit run app_advanced.py
+# 브라우저에서 http://localhost:8501 접속
 ```
 
-👉 [빠른 시작 가이드](./QUICKSTART.md)를 참조하세요!
+### 기본 테스트
 
-## 📁 프로젝트 구조
+```bash
+# Python 대화형 셸에서 테스트
+python
+
+>>> from src.orchestrator.query_orchestrator import QueryOrchestrator
+>>> orchestrator = QueryOrchestrator()
+>>> 
+>>> # 의료 질문
+>>> result = orchestrator.process("우리 강아지가 피부염이 있는데 어떻게 하죠?")
+>>> print(result["data"].answer)
+>>>
+>>> # 병원 질문
+>>> result = orchestrator.process("강남역 근처 동물병원 찾아줄래?")
+>>> print(result["data"].hospitals)
+```
+
+---
+
+## 프로젝트 구조
 
 ```
-.
-├── app.py                          # ⭐ Streamlit 메인 웹 앱
-├── app_advanced.py                 # 🚀 고급 기능 웹 앱
-├── streamlit_config.py             # ⚙️ 설정 관리
-├── .streamlit/
-│   └── config.toml                 # Streamlit 설정
-├── QUICKSTART.md                   # 🚀 5분 시작 가이드
-├── STREAMLIT_GUIDE.md              # 📖 상세 사용 설명서
-├── KAKAO_MAP_QUICKSTART.md         # 🗺️ 카카오맵 빠른 시작
-├── KAKAO_MAP_GUIDE.md              # 🗺️ 카카오맵 상세 가이드
+pet_medical_rag/
+├── app.py                          # Streamlit UI 메인 진입점
+├── requirements.txt                # 패키지 의존성
+│
 ├── src/
-│   ├── pipeline.py                 # LangGraph CRAG 파이프라인
-│   ├── retrieval.py                # Retriever (Top-K=5)
-│   ├── embeddings.py               # Embedding 모델 관리
-│   ├── ingestion.py                # 데이터 로딩
-│   ├── chunking.py                 # 문서 분할
-│   ├── kakao_map.py                # 🗺️ 카카오맵 모듈 (신규)
-│   ├── hospital_web_search.py      # 🗺️ 병원 웹 검색 모듈 (신규)
-│   └── ...
-├── chroma_db/                      # 벡터 DB (사전 생성됨)
-├── requirements.txt                # 필수 패키지 목록
-└── README.md                       # 이 파일
+│   ├── config/
+│   │   ├── settings.py            # 환경 변수 및 전역 설정
+│   │   └── logger.py              # 공통 로깅
+│   │
+│   ├── types/
+│   │   ├── document.py            # Document 타입 정의
+│   │   ├── query.py               # Query & Classification 타입
+│   │   └── response.py            # Response 타입
+│   │
+│   ├── utils/
+│   │   └── helpers.py             # 공통 헬퍼 함수
+│   │
+│   ├── classifier/
+│   │   └── question_classifier.py # 의도 분류 (QuestionClassifier)
+│   │
+│   ├── retriever/
+│   │   └── vector_store_retriever.py # 벡터 검색 (VectorStoreRetriever)
+│   │
+│   ├── web/
+│   │   ├── hospital_web_searcher.py  # 병원 검색 (HospitalWebSearcher)
+│   │   └── general_web_searcher.py   # 일반 검색 (GeneralWebSearcher)
+│   │
+│   ├── mapping/
+│   │   └── hospital_mapper.py     # 병원 위치 매핑 (HospitalMapper)
+│   │
+│   ├── rag/
+│   │   ├── langgraph_crag_pipeline.py # CRAG 파이프라인 메인
+│   │   ├── graph_builder.py           # 그래프 구성
+│   │   └── nodes/
+│   │       ├── retrieval_node.py      # 검색 노드
+│   │       ├── relevance_node.py      # 관련성 판단 노드
+│   │       ├── web_search_node.py     # 웹 검색 노드
+│   │       └── generation_node.py     # 답변 생성 노드
+│   │
+│   └── orchestrator/
+│       └── query_orchestrator.py  # 전체 시스템 오케스트레이션
+│
+├── tests/
+│   ├── test_classifier.py
+│   ├── test_retriever.py
+│   ├── test_pipeline.py
+│   └── test_integration.py
+│
+├── data/
+│   ├── docs/                      # 의료 문서 저장소
+│   ├── chroma_db/                 # 벡터 DB 저장 경로
+│   └── mock_data.json             # 테스트용 Mock 데이터
+│
+├── README.md                      # 이 파일
+├── ARCHITECTURE.md                # 상세 아키텍처 설명
+├── CONTRIBUTION.md                # 팀원 확장 가이드
+└── PROJECT_STRUCTURE.txt          # 프로젝트 구조 상세 설명
 ```
 
-## ✨ 주요 기능
+---
 
-### 🎯 핵심 RAG 기능
-- **Retrieval**: 벡터 DB에서 Top-K=5 문서 검색 (Similarity Score)
-- **Grading**: LLM 기반 문서 관련성 평가 (Yes/No)
-- **Web Search Fallback**: 관련 문서 부족 시 Tavily API로 자동 웹 검색
-- **Generation**: 컨텍스트 기반 LLM 답변 생성
+## 핵심 모듈
 
-### 🌐 Streamlit 웹 인터페이스
-- ✅ 채팅 형식의 직관적인 UI
-- 📚 참고 문서 출처 표시 (내부/웹 구분)
-- 🐛 디버그 정보 보기 (Similarity Score, 관련성 판정, 웹 검색 여부)
-- 📊 대화 통계 및 성능 모니터링
-- 💾 세션 상태 자동 유지
-
-### 🗺️ 카카오맵 병원 위치 표시 (신규!)
-- **전체 병원 지도**: CSV에서 1,000+ 서울시 동물병원 시각화
-- **병원 검색**: 질문에서 병원명 자동 인식 및 웹 검색
-- **인터랙티브 지도**: 마커 클릭으로 상세 정보 확인
-- **병원 목록**: 주소, 전화번호 등 정보 표시
-
-### ⚙️ 고급 기능 (app_advanced.py)
-- 🎚️ 설정 프리셋 (Fast, Balanced, Accurate, Creative)
-- 🔧 LLM 모델 선택 (gpt-4o-mini, gpt-4-turbo, gpt-4o)
-- 🎛️ Top-K, Temperature 동적 조정
-- ⏱️ 성능 추적 및 그래프 시각화
-- 📈 응답 시간 추이 분석
-
-### 📱 사용자 경험
-- 🚀 한 번의 설정으로 자동 캐싱 (빠른 재로딩)
-- 🎨 반응형 디자인 및 커스텀 CSS
-- 💡 예시 질문 빠른 선택
-- 🗑️ 대화 초기화 및 재시작
-
-## 🔧 설치 및 실행
-
-### 1단계: 필수 패키지 설치
-
-```bash
-pip install -r requirements.txt
-```
-
-**주요 패키지:**
-- streamlit: 웹 애플리케이션 프레임워크
-- langchain: LLM 오케스트레이션
-- langgraph: 상태 그래프 (CRAG 패턴)
-- chromadb: 벡터 DB
-- openai: OpenAI API
-
-### 2단계: API 키 설정
-
-`.env` 파일을 프로젝트 루트에 생성:
-
-```bash
-OPENAI_API_KEY=sk-your-key-here
-TAVILY_API_KEY=tvly-your-key-here  # 선택사항 (웹 검색)
-```
-
-**API 획득:**
-- OpenAI: https://platform.openai.com/api-keys
-- Tavily: https://tavily.com/
-
-### 3단계: Streamlit 앱 실행
-
-**기본 버전 (권장):**
-```bash
-streamlit run app.py
-```
-
-**고급 버전 (설정 프리셋 포함):**
-```bash
-streamlit run app_advanced.py
-```
-
-🌐 자동으로 브라우저가 열립니다 → `http://localhost:8501`
-
-## 📖 가이드 문서
-
-| 문서 | 설명 |
-|------|------|
-| [🚀 QUICKSTART.md](./QUICKSTART.md) | 5분 안에 시작하기 |
-| [📖 STREAMLIT_GUIDE.md](./STREAMLIT_GUIDE.md) | 상세 사용 설명서 |
-| [⚙️ streamlit_config.py](./streamlit_config.py) | 설정 및 프리셋 |
-
-## 💻 코드에서 직접 사용
-
-기존 터미널 환경에서도 RAG를 사용할 수 있습니다:
-
+### 1. QuestionClassifier
 ```python
-from src.embeddings import get_embedding_model, load_vectorstore
-from src.retrieval import create_retriever
-from src.pipeline import LangGraphRAGPipeline
+from src.classifier.question_classifier import QuestionClassifier
 
-# RAG 파이프라인 설정
-embedding_model = get_embedding_model("openai")
-vectorstore = load_vectorstore(embedding_model)
-retriever = create_retriever(vectorstore, top_k=5)
-
-pipeline = LangGraphRAGPipeline(retriever, debug=True)
-
-# 질문하기
-result = pipeline.rag_pipeline_with_sources("강아지 피부 질환의 증상은?")
-print(result['answer'])
-print(result['sources'])
+classifier = QuestionClassifier()
+result = classifier.classify("우리 강아지가 피부염이...")
+print(result.intent)  # "medical"
+print(result.confidence)  # 0.95
 ```
 
-## ⚙️ 설정 옵션
+**확장 포인트**:
+- LLM 기반 분류로 업그레이드 (`classify_with_llm()`)
+- 새로운 의도 카테고리 추가
+- 커스텀 키워드 추가 (`add_custom_keywords()`)
 
-### Streamlit 설정 프리셋
-
-**app_advanced.py 사이드바에서 선택:**
-
-| 프리셋 | 속도 | 품질 | 용도 |
-|--------|------|------|------|
-| ⚡ Fast | 1-2초 | 보통 | 빠른 답변 필요 |
-| ⚖️ Balanced | 2-3초 | 좋음 | 일반적인 사용 (기본값) |
-| 🎯 Accurate | 3-5초 | 최고 | 정확한 답변 필요 |
-| ✨ Creative | 3-5초 | 창의적 | 다양한 관점 필요 |
-
-### LLM 모델 선택
-
+### 2. VectorStoreRetriever
 ```python
-# app.py 수정
-pipeline = LangGraphRAGPipeline(
-    retriever,
-    llm_model="gpt-4o",  # "gpt-4o-mini", "gpt-4-turbo", "gpt-4o"
-    temperature=0.0,
-    debug=False
+from src.retriever.vector_store_retriever import VectorStoreRetriever
+
+retriever = VectorStoreRetriever()
+results = retriever.search("반려견 피부염 증상", top_k=5)
+
+for doc in results.documents:
+    print(f"Score: {doc.score}")
+    print(f"Content: {doc.content[:100]}...")
+```
+
+**확장 포인트**:
+- ChromaDB 실제 연동
+- 다른 벡터DB 지원 (Pinecone, Weaviate 등)
+- 임베딩 모델 변경
+
+### 3. LangGraphRAGPipeline
+```python
+from src.rag.langgraph_crag_pipeline import LangGraphRAGPipeline
+
+pipeline = LangGraphRAGPipeline()
+response = pipeline.invoke(
+    query="반려견 피부염 치료법",
+    intent="medical"
 )
+print(response.answer)
+print(response.documents)
 ```
 
-### Top-K 값 조정
+**확장 포인트**:
+- LLM 기반 답변 생성 (`generation_node_llm()`)
+- 새로운 노드 추가
+- 스트리밍 지원
 
+### 4. QueryOrchestrator
 ```python
-# retriever top-k 설정
-retriever = create_retriever(vectorstore, top_k=10)
+from src.orchestrator.query_orchestrator import QueryOrchestrator
+
+orchestrator = QueryOrchestrator()
+result = orchestrator.process("우리 강아지 병원 찾아줄래?")
+
+if result["type"] == "hospital":
+    hospitals = result["data"].hospitals
+    for h in hospitals:
+        print(f"{h['name']} - {h['distance']}m away")
 ```
 
-## 📚 코어 모듈 설명
+---
 
-### 🔄 pipeline.py - LangGraph CRAG 파이프라인
-```
-[질문] → [Retrieve] → [Grade] → [Decision] 
-              ↓          ↓          ↓
-          Top-K=5    Yes/No     Generate?
-                               ↓
-                        [Web Search] (선택)
-                               ↓
-                          [Generate]
-                               ↓
-                         [최종 답변]
-```
+## 확장 가이드
 
-**주요 클래스:**
-- `LangGraphRAGPipeline`: 5단계 CRAG 파이프라인 구현
-- `CRAGState`: 상태 관리
-- `rag_pipeline_with_sources()`: 답변 + 출처 정보 반환
+### 팀원 역할별 확장 방향
 
-### 🔍 retrieval.py - 벡터 검색
-- `SimpleRetriever`: Top-K 검색 (기본값: 5)
-- `retrieve_with_scores()`: 유사도 점수 함께 반환
-- Similarity Score: 1 - cosine_distance
+#### 🔍 **데이터/검색 팀**
+- `src/retriever/`: ChromaDB 실제 연동, 더 나은 검색 알고리즘
+- `src/web/`: 실제 API (Google, Naver, Kakao) 연동
+- 의료 문서 수집 및 벡터화
 
-### 🧠 embeddings.py - 임베딩 모델
-- `get_embedding_model()`: OpenAI 또는 HuggingFace 선택
-- `load_vectorstore()`: Chroma DB 로드
-- 기본 모델: `text-embedding-3-small`
+#### 🧠 **LLM/AI 팀**
+- `src/classifier/question_classifier.py`: LLM 기반 분류기로 확장
+- `src/rag/nodes/generation_node.py`: GPT-4/Claude 기반 답변 생성
+- `src/rag/nodes/relevance_node.py`: LLM 기반 관련성 평가
 
-### 📄 ingestion.py - 데이터 로딩
-- JSON 파일 로드 및 Document 변환
-- 메타데이터 추출 (file_name, department, title 등)
+#### 🏥 **도메인/비즈니스 팀**
+- `src/mapping/hospital_mapper.py`: 병원 정보 DB 구축
+- 도메인 특화 규칙 추가
+- 사용자 피드백 루프 구현
 
-### ✂️ chunking.py - 문서 분할
-- 토큰 기반 청킹 (min: 300, max: 500)
-- Overlap: 25% (중복 처리)
+#### 🎨 **프론트엔드 팀**
+- `app.py`: Streamlit UI 개선
+- 고급 시각화
+- 모바일 앱 개발
 
-## 🚨 주의사항
+---
 
-1. **API 키**: `.env` 파일에 `OPENAI_API_KEY` 필수 설정
-2. **벡터 DB**: 사전 생성된 `chroma_db` 디렉토리 필요
-3. **메모리**: 임베딩 모델 로드 시 3-4GB 필요
-4. **네트워크**: OpenAI API 통신 필수
+## 테스트
 
-## 🐛 트러블슈팅
-
-### "OPENAI_API_KEY not found"
+### 단위 테스트
 ```bash
-# .env 파일 생성 및 API 키 추가
-OPENAI_API_KEY=sk-your-key-here
+# 분류기 테스트
+pytest tests/test_classifier.py -v
+
+# 검색 시스템 테스트
+pytest tests/test_retriever.py -v
+
+# RAG 파이프라인 테스트
+pytest tests/test_pipeline.py -v
 ```
 
-### "Chroma DB not found"
+### 통합 테스트
 ```bash
-# 기존 chroma_db 디렉토리 확인
-# 또는 데이터 재로드 필요
-python src/ingestion.py
+# 전체 시스템 테스트
+pytest tests/test_integration.py -v
+
+# 특정 테스트만 실행
+pytest tests/test_integration.py::test_end_to_end -v
 ```
 
-### "Port 8501 already in use"
-```bash
-streamlit run app.py --server.port 8502
+### 수동 테스트
+```python
+# Python 대화형 셸에서 테스트
+python
+
+>>> from src.orchestrator.query_orchestrator import QueryOrchestrator
+>>> from src.classifier.question_classifier import QuestionClassifier
+>>>
+>>> # 분류기 테스트
+>>> clf = QuestionClassifier()
+>>> print(clf.classify("우리 강아지 피부염이...").intent)
+>>>
+>>> # 오케스트레이터 테스트
+>>> orch = QueryOrchestrator()
+>>> result = orch.process("강남역 근처 동물병원")
+>>> print(result["type"])
 ```
 
-### 느린 응답
-```bash
-# 더 빠른 모델 사용: app.py에서 llm_model 변경
-llm_model="gpt-4o-mini"  # 빠름
+---
 
-# 또는 고급 버전에서 Fast 프리셋 선택
+## 환경 변수 설정
+
+`.env` 파일을 생성하고 다음 변수들을 설정하세요:
+
+```env
+# LLM 설정
+OPENAI_API_KEY=sk-...
+LLM_MODEL=gpt-4
+
+# 벡터 DB
+CHROMA_PERSIST_DIR=./data/chroma_db
+EMBEDDING_MODEL=text-embedding-ada-002
+
+# 웹 검색 API
+GOOGLE_SEARCH_API_KEY=...
+KAKAO_MAP_API_KEY=...
+
+# 시스템
+LOG_LEVEL=INFO
+DEBUG=false
 ```
 
-더 많은 도움말은 [STREAMLIT_GUIDE.md](./STREAMLIT_GUIDE.md) 참조
+---
 
-## 📊 성능 기준
+## 주요 클래스 및 메서드
 
-| 작업 | 시간 | 
-|------|------|
-| 파이프라인 초기화 | 2-3초 |
-| 평균 응답 시간 | 2-4초 (gpt-4o-mini) |
-| 웹 검색 포함 | 4-6초 |
-| 시스템 총 메모리 | 3-5GB |
+| 클래스 | 메서드 | 설명 |
+|--------|--------|------|
+| `QuestionClassifier` | `classify(query)` | 질문 분류 |
+| | `classify_with_llm(query)` | LLM 기반 분류 |
+| | `add_custom_keywords()` | 키워드 추가 |
+| `VectorStoreRetriever` | `search(query, top_k)` | 벡터 검색 |
+| | `add_documents(docs)` | 문서 추가 |
+| | `health_check()` | 상태 확인 |
+| `HospitalWebSearcher` | `search(query)` | 병원 검색 |
+| | `search_by_coordinates()` | 좌표 기반 검색 |
+| | `get_hospital_details()` | 병원 상세정보 |
+| `HospitalMapper` | `extract_and_search()` | 위치 추출 및 검색 |
+| | `extract_location()` | 위치 정보 추출 |
+| | `get_distance()` | 거리 계산 |
+| `LangGraphRAGPipeline` | `invoke(query, intent)` | 파이프라인 실행 |
+| | `invoke_batch(queries)` | 배치 처리 |
+| | `health_check()` | 시스템 상태 확인 |
+| `QueryOrchestrator` | `process(query)` | 전체 시스템 실행 |
+| | `get_statistics()` | 통계 조회 |
+
+---
+
+## 로깅 및 디버깅
+
+### 로그 레벨 설정
+```python
+from src.config.settings import settings
+
+settings.LOG_LEVEL = "DEBUG"  # DEBUG, INFO, WARNING, ERROR
+settings.DEBUG = True
+```
+
+### 로거 사용
+```python
+from src.config.logger import get_logger
+
+logger = get_logger(__name__)
+logger.info("Information message")
+logger.debug("Debug message")
+logger.error("Error message")
+```
+
+---
+
+## 성능 최적화 팁
+
+1. **벡터 검색 최적화**
+   - ChromaDB 색인 크기 조정
+   - 배치 검색 활용
+
+2. **LLM 호출 최적화**
+   - 결과 캐싱
+   - 토큰 사용량 모니터링
+   - 동적 프롬프트 길이 조정
+
+3. **웹 검색 최적화**
+   - 결과 캐싱
+   - 요청 타임아웃 설정
+   - Rate limiting
+
+---
+
+## 기여 가이드
+
+팀원들의 기여를 환영합니다!
+
+1. **Feature Branch 생성**
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+2. **코드 작성 및 테스트**
+   ```bash
+   pytest tests/
+   ```
+
+3. **Pull Request 제출**
+   - 상세한 설명 포함
+   - 관련 이슈 링크
+
+더 자세한 내용은 [CONTRIBUTION.md](CONTRIBUTION.md) 참조
+
+---
 
 ## 라이선스
 
-이 프로젝트는 교육 및 연구 목적으로 제공됩니다.
+MIT License - 자유롭게 사용, 수정, 배포 가능
+
+---
+
+## 연락처
+
+- 프로젝트 리드: [팀 리더 이름]
+- 이메일: [이메일]
+- 슬랙: #pet-medical-rag
+
+---
+
+## 버전 히스토리
+
+- **v0.1.0** (2024-01-15)
+  - 초기 프로젝트 구조
+  - 핵심 모듈 구현
+  - Streamlit UI 기본 버전
+
+---
+
+**Happy Coding! 🐾**
 

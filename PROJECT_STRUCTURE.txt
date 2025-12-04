@@ -1,0 +1,193 @@
+================================================================================
+반려동물 의료 전문 QA + 동물병원 위치 안내 RAG 기반 멀티채널 LLM 서비스
+공통 기준 코드 디렉토리 구조
+================================================================================
+
+pet_medical_rag/
+├── README.md                          # 프로젝트 개요 및 셋업 가이드
+├── requirements.txt                   # 패키지 의존성
+├── .env.example                       # 환경 변수 템플릿
+├── ARCHITECTURE.md                    # 아키텍처 설명 및 확장 가이드
+├── CONTRIBUTION.md                    # 팀원 확장 가이드
+│
+├── app.py                             # 🎯 Streamlit UI 진입점 (공통 기준)
+│
+├── src/
+│   │
+│   ├── __init__.py
+│   │
+│   ├── config/
+│   │   ├── __init__.py
+│   │   ├── settings.py                # 전역 설정 (placeholder로 실제 값은 .env에서)
+│   │   └── logger.py                  # 공통 로깅 설정
+│   │
+│   ├── types/                         # 공통 타입 정의
+│   │   ├── __init__.py
+│   │   ├── document.py                # Document 타입
+│   │   ├── query.py                   # Query 타입
+│   │   └── response.py                # Response 타입
+│   │
+│   ├── utils/                         # 공통 유틸리티
+│   │   ├── __init__.py
+│   │   └── helpers.py                 # 범용 헬퍼 함수
+│   │
+│   ├── classifier/                    # 의도 분류 모듈
+│   │   ├── __init__.py
+│   │   └── question_classifier.py     # QuestionClassifier 클래스
+│   │
+│   ├── retriever/                     # 벡터 검색 시스템
+│   │   ├── __init__.py
+│   │   ├── vector_store_retriever.py  # VectorStoreRetriever 클래스
+│   │   └── chroma_adapter.py          # ChromaDB 어댑터 (확장용)
+│   │
+│   ├── web/                           # 웹 검색 시스템
+│   │   ├── __init__.py
+│   │   ├── hospital_web_searcher.py   # HospitalWebSearcher 클래스
+│   │   └── general_web_searcher.py    # GeneralWebSearcher 클래스
+│   │
+│   ├── mapping/                       # 병원 위치 매핑
+│   │   ├── __init__.py
+│   │   └── hospital_mapper.py         # HospitalMapper 클래스
+│   │
+│   ├── rag/                           # CRAG 파이프라인
+│   │   ├── __init__.py
+│   │   ├── langgraph_crag_pipeline.py # LangGraphRAGPipeline 클래스
+│   │   ├── nodes/                     # LangGraph 노드들
+│   │   │   ├── __init__.py
+│   │   │   ├── retrieval_node.py      # 검색 노드
+│   │   │   ├── relevance_node.py      # 관련성 판단 노드
+│   │   │   ├── generation_node.py     # 답변 생성 노드
+│   │   │   └── web_search_node.py     # 웹 검색 노드
+│   │   └── graph_builder.py           # LangGraph 그래프 구성
+│   │
+│   └── orchestrator/                  # 전체 오케스트레이션
+│       ├── __init__.py
+│       └── query_orchestrator.py      # QueryOrchestrator 클래스
+│
+├── tests/                             # 테스트 코드
+│   ├── __init__.py
+│   ├── test_classifier.py
+│   ├── test_retriever.py
+│   ├── test_pipeline.py
+│   └── test_integration.py
+│
+└── data/                              # 데이터 저장소
+    ├── docs/                          # 의료 문서 (샘플)
+    ├── chroma_db/                     # ChromaDB 저장 경로
+    └── mock_data.json                 # Mock 데이터 (테스트용)
+
+
+================================================================================
+모듈 간 데이터 흐름 (Data Flow)
+================================================================================
+
+사용자 질문 입력 (app.py)
+    ↓
+[1] QuestionClassifier
+    ├→ "medical" / "hospital" / "general" / "unknown" 분류
+    └→ Classification 결과 반환
+    ↓
+[2] QueryOrchestrator (의도에 따라 라우팅)
+    │
+    ├─→ medical/hospital 질문
+    │   ├→ LangGraphRAGPipeline 호출
+    │   │   ├→ [RetrieverNode] VectorStoreRetriever.search()
+    │   │   ├→ [RelevanceNode] 관련성 판단
+    │   │   ├→ IF 관련문서 없음 → [WebSearchNode] 트리거
+    │   │   │   ├→ HospitalWebSearcher or GeneralWebSearcher
+    │   │   │   └→ 검색 결과 반환
+    │   │   └→ [GenerationNode] LLM 기반 답변 생성
+    │   └→ 최종 응답 + 매핑 정보
+    │
+    ├─→ hospital(위치) 질문
+    │   ├→ HospitalMapper.extract_and_search()
+    │   ├→ 병원 위치 정보 조회
+    │   └→ 좌표 + 병원 정보 반환
+    │
+    └─→ general 질문
+        └→ GeneralWebSearcher 호출
+            └→ 웹 검색 결과 반환
+
+최종 응답 (UI에 표시)
+
+
+================================================================================
+핵심 클래스/인터페이스
+================================================================================
+
+1. QuestionClassifier
+   - intent: str ← classify(question: str)
+   - 추후 LLM 기반으로 확장 가능
+
+2. VectorStoreRetriever
+   - documents: List[Document] ← search(query: str, top_k: int)
+   - 추후 다양한 벡터DB 지원 가능
+
+3. HospitalWebSearcher / GeneralWebSearcher
+   - results: List[Dict] ← search(query: str)
+   - Fallback 시스템으로 활용
+
+4. HospitalMapper
+   - locations: List[Dict] ← extract_and_search(query: str)
+   - 좌표 + 병원 정보 반환
+
+5. LangGraphRAGPipeline
+   - response: str ← invoke(query: str, docs: List[Document])
+   - 노드 기반 워크플로우로 확장 가능
+
+6. QueryOrchestrator
+   - result: Dict ← process(question: str)
+   - 전체 흐름 조정
+
+
+================================================================================
+환경 변수 (.env 템플릿)
+================================================================================
+
+# LLM 관련
+OPENAI_API_KEY=your-key-here
+LLM_MODEL=gpt-4
+
+# 벡터 DB
+CHROMA_PERSIST_DIR=./data/chroma_db
+EMBEDDING_MODEL=text-embedding-ada-002
+
+# 웹 검색
+GOOGLE_SEARCH_API_KEY=your-key-here
+KAKAO_MAP_API_KEY=your-key-here
+
+# 시스템
+LOG_LEVEL=INFO
+DEBUG=false
+
+
+================================================================================
+확장 포인트 (Hook Points for Teams)
+================================================================================
+
+1. Classifier 고도화
+   - src/classifier/question_classifier.py → LLM 기반 분류기로 교체
+   - intent 카테고리 추가/수정
+
+2. Retriever 고도화
+   - src/retriever/chroma_adapter.py → 다른 벡터DB (Pinecone, Weaviate 등) 연동
+   - 임베딩 모델 변경 (Ollama, HuggingFace 등)
+
+3. RAG 파이프라인 고도화
+   - src/rag/nodes/ → 새로운 노드 추가
+   - src/rag/graph_builder.py → 복잡한 워크플로우 구성
+
+4. 웹 검색 고도화
+   - src/web/ → 실제 API 연동 (Google, Naver, 카카오 등)
+
+5. 병원 정보 시스템 고도화
+   - src/mapping/ → 실제 카카오맵 API 연동
+   - 병원 정보 데이터베이스 구축
+
+6. UI 고도화
+   - app.py → 더 복잡한 Streamlit 대시보드
+   - 히스토리, 피드백, 평가 시스템 추가
+
+
+================================================================================
+

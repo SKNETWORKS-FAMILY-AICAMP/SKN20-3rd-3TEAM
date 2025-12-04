@@ -1,21 +1,10 @@
 """
-RAG 시스템 패키지
-"""
-from .ingestion import ingest_data
-from .chunking import chunk_documents_with_token_range
-from .embeddings import get_embedding_model, create_vectorstore, load_vectorstore
-from .retrieval import create_retriever, SimpleRetriever
-from .pipeline import create_rag_pipeline, RAGPipeline
+반려동물 의료 RAG 시스템 - 메인 패키지
 
-__all__ = [
-    'ingest_data',
-    'chunk_documents_with_token_range',
-    'get_embedding_model',
-    'create_vectorstore',
-    'load_vectorstore',
-    'create_retriever',
-    'SimpleRetriever',
-    'create_rag_pipeline',
-    'RAGPipeline'
-]
+이 패키지는 의도 분류, 벡터 검색, 웹 검색, 병원 매핑, CRAG 파이프라인을 포함한
+멀티채널 LLM 서비스의 공통 기반을 제공합니다.
+"""
+
+__version__ = "0.1.0"
+__author__ = "Pet Medical RAG Team"
 
