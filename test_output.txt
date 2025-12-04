@@ -1,3 +1,0 @@
-시작
-sys.path 추가
-import 시도
