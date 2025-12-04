@@ -136,8 +136,24 @@ if not st.session_state.location_checked:
         
         try:
             # 병원 추천 Tool 호출
-            from src.utils.tools import hospital_recommend_tool
-            hospital_result_text = hospital_recommend_tool.invoke(lat=lat, lon=lon)
+            from src.utils.tools import search_nearby_hospitals
+            hospital_list = search_nearby_hospitals(lat=lat, lon=lon)
+            
+            if hospital_list and hospital_list[0].get("error"):
+                hospital_result_text = f"❌ 병원 검색 오류: {hospital_list[0]['error']}"
+            elif not hospital_list:
+                hospital_result_text = "주변 5km 이내에 동물병원을 찾을 수 없습니다."
+            else:
+                formatted_output = ["📍 사용자 위치 기준 가장 가까운 동물병원 정보입니다:\n"]
+                for i, hosp in enumerate(hospital_list, 1):
+                    distance_km = float(hosp['distance_m']) / 1000.0
+                    formatted_output.append(
+                        f"{i}. **{hosp['name']}**\n"
+                        f"   - 거리: 약 {distance_km:.2f} km\n"
+                        f"   - 주소: {hosp['address']}\n"
+                        f"   - 전화번호: {hosp['phone']}\n"
+                    )
+                hospital_result_text = "\n".join(formatted_output)
             
             # 환영 메시지 및 병원 추천 결과 출력
             welcome_message = f"""안녕하세요! 🐾 **반려동물 건강 상담 챗봇**입니다.
@@ -340,12 +356,12 @@ if user_input := st.chat_input("증상을 입력하거나 위치 정보를 알�
                 department = st.session_state.last_department
                 
                 try:
-                    from src.utils.tools import hospital_recommend_tool
+                    from src.utils.tools import search_nearby_hospitals
                     
                     # GPS 좌표가 있으면 GPS 우선 사용, 없으면 텍스트 주소 사용
                     if st.session_state.user_gps_location:
                         gps = st.session_state.user_gps_location
-                        hospital_result = hospital_recommend_tool.invoke(
+                        hospital_list = search_nearby_hospitals(
                             lat=gps["lat"], 
                             lon=gps["lon"]
                         )
@@ -353,8 +369,25 @@ if user_input := st.chat_input("증상을 입력하거나 위치 정보를 알�
                     else:
                         # 텍스트 주소 사용
                         location = user_input
-                        hospital_result = hospital_recommend_tool.invoke(query=location)
+                        hospital_list = search_nearby_hospitals(query=location)
                         location_display = location
+                    
+                    # 검색 결과 포맷팅
+                    if hospital_list and hospital_list[0].get("error"):
+                        hospital_result = f"❌ 병원 검색 오류: {hospital_list[0]['error']}"
+                    elif not hospital_list:
+                        hospital_result = "주변 5km 이내에 동물병원을 찾을 수 없습니다."
+                    else:
+                        formatted_output = ["📍 사용자 위치 기준 가장 가까운 동물병원 정보입니다:\n"]
+                        for i, hosp in enumerate(hospital_list, 1):
+                            distance_km = float(hosp['distance_m']) / 1000.0
+                            formatted_output.append(
+                                f"{i}. **{hosp['name']}**\n"
+                                f"   - 거리: 약 {distance_km:.2f} km\n"
+                                f"   - 주소: {hosp['address']}\n"
+                                f"   - 전화번호: {hosp['phone']}\n"
+                            )
+                        hospital_result = "\n".join(formatted_output)
                     
                     response_text = f"""
 📍 **위치 기반 병원 추천 결과**
