@@ -35,6 +35,9 @@ class CRAGState(TypedDict):
     answer: str
     grade_results: List[str]
     sources: List[Dict[str, Any]]
+    answer_quality: str  # "pass" 또는 "fail"
+    answer_quality_reason: str  # 평가 사유
+    rewrite_count: int  # Rewrite 시도 횟수
 
 
 class GradeDocuments(BaseModel):
@@ -136,7 +139,7 @@ class LangGraphRAGPipeline:
         return rewrite_prompt | self.llm | StrOutputParser()
     
     def _build_graph(self):
-        """LangGraph 상태 그래프 구축"""
+        """LangGraph 상태 그래프 구축 (평가 및 Rewrite 루프 포함)"""
         workflow = StateGraph(CRAGState)
         
         # 노드들 정의
@@ -145,6 +148,7 @@ class LangGraphRAGPipeline:
         workflow.add_node("query_rewrite", self._query_rewrite_node)
         workflow.add_node("web_search", self._web_search_node)
         workflow.add_node("generate", self._generate_node)
+        workflow.add_node("evaluate_answer", self._evaluate_answer_node)  # 평가 노드 추가
         
         # 엣지 설정
         workflow.add_edge(START, "retrieve")
@@ -159,7 +163,17 @@ class LangGraphRAGPipeline:
         )
         workflow.add_edge("query_rewrite", "web_search")
         workflow.add_edge("web_search", "generate")
-        workflow.add_edge("generate", END)
+        workflow.add_edge("generate", "evaluate_answer")  # 생성 후 평가
+        
+        # 평가 결과에 따른 조건부 라우팅
+        workflow.add_conditional_edges(
+            "evaluate_answer",
+            self._decide_after_evaluation,
+            {
+                "end": END,
+                "rewrite": "query_rewrite"  # Fail 시 쿼리 재작성
+            }
+        )
         
         return workflow.compile()
     
@@ -286,80 +300,142 @@ class LangGraphRAGPipeline:
         """
         다음 단계 결정 (생성 또는 웹 검색)
         
-        핵심 로직:
-        - relevant_docs_count >= 1 → GENERATE (내부 문서 답변)
-        - relevant_docs_count == 0 → WEB_SEARCH (웹 검색)
+        개선된 로직 (Threshold 기반):
+        - avg_relevance_score >= THRESHOLD → GENERATE (내부 문서 답변)
+        - avg_relevance_score < THRESHOLD → WEB_SEARCH (웹 검색)
         """
         filtered_docs = state.get("filtered_documents", [])
-        web_search_reason = state.get("web_search_reason", "")
         document_scores = state.get("document_scores", [])
+        RELEVANCE_THRESHOLD = 0.5  # 관련성 점수 기준
+        MIN_DOCS_THRESHOLD = 1  # 최소 문서 수
         
         if self.debug:
             print("\n" + "="*80)
-            print("📍 [3/5] DECISION NODE - 다음 루트 결정 (내부/웹 선택)")
+            print("📍 [3/5] DECISION NODE - 다음 루트 결정 (Threshold 기반)")
             print("="*80)
             print(f"📊 관련 문서 수: {len(filtered_docs)}개")
             if document_scores:
                 avg_score = sum(document_scores) / len(document_scores)
                 print(f"📊 Similarity Score 평균: {avg_score:.4f}")
         
-        # 핵심 조건: relevant_docs_count 기준
         relevant_docs_count = len(filtered_docs)
         
         if self.debug:
-            print(f"\n📋 결정 기준:")
-            print(f"   - relevant_docs_count: {relevant_docs_count}개")
+            print(f"\n📋 판정 기준:")
+            print(f"   - 관련 문서 최소 개수: {MIN_DOCS_THRESHOLD}개")
+            print(f"   - 관련성 점수 기준(Threshold): {RELEVANCE_THRESHOLD}")
             print(f"   - 웹 검색 API 가용: {self.web_search_available}")
         
-        # 조건 판정: 관련 문서가 1개 이상이면 내부 문서로 답변
-        if relevant_docs_count >= 1:
-            if self.debug:
-                print(f"\n✅ 결정: GENERATE 루트로 이동")
-                print(f"   → 이유: 관련 문서 {relevant_docs_count}개 존재")
-                print(f"   → 내부 문서 기반 답변 생성")
-            return "generate"
+        # 개선된 조건 판정
+        # 1. 관련 문서가 최소 개수 이상이면서
+        # 2. 평균 유사도 점수가 Threshold 이상인 경우만 내부 문서로 답변
+        if relevant_docs_count >= MIN_DOCS_THRESHOLD:
+            # 점수 기반 평가
+            if document_scores:
+                avg_score = sum(document_scores) / len(document_scores)
+                
+                # 높은 신뢰도 → 내부 문서 사용
+                if avg_score >= RELEVANCE_THRESHOLD:
+                    if self.debug:
+                        print(f"\n✅ 결정: GENERATE 루트")
+                        print(f"   → 이유: 평균 점수 {avg_score:.4f} >= {RELEVANCE_THRESHOLD}")
+                        print(f"   → 내부 문서 기반 고품질 답변 생성")
+                    return "generate"
+                # 낮은 신뢰도 → 웹 검색으로 보완
+                else:
+                    if self.debug:
+                        print(f"\n🌐 결정: WEB_SEARCH 루트")
+                        print(f"   → 이유: 평균 점수 {avg_score:.4f} < {RELEVANCE_THRESHOLD}")
+                        print(f"   → 웹 검색으로 더 나은 정보 획득")
+                    return "web_search" if self.web_search_available else "generate"
+            else:
+                # 점수 정보가 없으면 문서 개수로 판정
+                if self.debug:
+                    print(f"\n✅ 결정: GENERATE 루트 (점수 정보 없음)")
+                return "generate"
         
-        # 관련 문서가 0개면 웹 검색 (API 가용성 확인)
+        # 관련 문서가 없는 경우 웹 검색
         else:
             if self.web_search_available:
                 if self.debug:
-                    print(f"\n🌐 결정: WEB_SEARCH 루트로 이동")
-                    print(f"   → 이유: {web_search_reason or '관련 문서 없음'}")
+                    print(f"\n🌐 결정: WEB_SEARCH 루트")
+                    print(f"   → 이유: 관련 문서 부족 (0개)")
                     print(f"   → 웹에서 정보 검색")
                 return "web_search"
             else:
                 # 웹 검색 API 불가능한 경우 내부 문서로 진행
                 if self.debug:
-                    print(f"\n⚠️ 결정: GENERATE 루트로 이동 (웹 검색 API 불가)")
-                    print(f"   → 웹 검색 API를 사용할 수 없어 내부 문서로 진행")
+                    print(f"\n⚠️ 결정: GENERATE 루트 (웹 검색 API 불가)")
+                    print(f"   → 웹 검색 API 불가능 → 내부 문서로 진행")
                 return "generate"
     
     def _query_rewrite_node(self, state: CRAGState) -> dict:
-        """웹 검색용 쿼리 최적화 노드"""
+        """
+        웹 검색용 쿼리 최적화 노드
+        Fail 상황에서는 더 개선된 쿼리 작성
+        """
         question = state["question"]
+        rewrite_count = state.get("rewrite_count", 0)
+        is_rewrite = rewrite_count > 0  # 재작성인지 처음인지 확인
         
         if self.debug:
-            print("\n" + "="*80)
-            print("📍 [3-1/5] QUERY REWRITE NODE - 웹 검색 쿼리 최적화")
-            print("="*80)
+            if is_rewrite:
+                print("\n" + "="*80)
+                print(f"📍 QUERY REWRITE NODE (재시도 {rewrite_count}) - 쿼리 개선")
+                print("="*80)
+            else:
+                print("\n" + "="*80)
+                print("📍 [3-1/5] QUERY REWRITE NODE - 웹 검색 쿼리 최적화")
+                print("="*80)
             print(f"❓ 원본 질문: {question}\n")
         
         try:
-            # 쿼리 최적화 LLM 호출
-            query_rewriter = self._setup_query_rewriter()
-            optimized_query = query_rewriter.invoke({"question": question}).strip()
+            # 재작성인 경우 더 강화된 프롬프트 사용
+            if is_rewrite:
+                rewrite_prompt = ChatPromptTemplate.from_messages([
+                    ("system", """이전 답변이 만족스럽지 못했습니다.
+더 나은 답변을 얻기 위해 검색 쿼리를 더 구체적으로 개선하세요.
+
+개선 방법:
+1. 핵심 키워드 강조
+2. 추가 맥락 포함
+3. 동의어나 관련 용어 추가
+4. 구체적인 예시 또는 세부사항 포함"""),
+                    ("human", "{question}")
+                ])
+            else:
+                query_rewriter = self._setup_query_rewriter()
+                optimized_query = query_rewriter.invoke({"question": question}).strip()
+                
+                if self.debug:
+                    print(f"🔍 최적화된 검색 쿼리: {optimized_query}")
+                    print(f"   → 이 쿼리로 웹 검색 수행합니다\n")
+                
+                return {
+                    "question": optimized_query,
+                    "rewrite_count": rewrite_count + 1
+                }
+            
+            # 재작성용 LLM
+            rewriter = self.llm.with_structured_output(
+                type("QueryRewrite", (), {"query": str})
+            )
+            
+            improved_question = rewrite_prompt | self.llm | StrOutputParser()
+            optimized_query = improved_question.invoke({"question": question}).strip()
             
             if self.debug:
-                print(f"🔍 최적화된 검색 쿼리: {optimized_query}")
-                print(f"   → 이 쿼리로 웹 검색 수행합니다\n")
+                print(f"🔄 개선된 검색 쿼리: {optimized_query}\n")
+        
         except Exception as e:
             if self.debug:
                 print(f"⚠️ 쿼리 최적화 실패: {str(e)}")
-                print(f"   → 원본 질문으로 웹 검색 진행")
+                print(f"   → 원본 질문으로 검색 진행")
             optimized_query = question
         
         return {
-            "question": optimized_query
+            "question": optimized_query,
+            "rewrite_count": rewrite_count + 1
         }
     
     def _web_search_node(self, state: CRAGState) -> dict:
@@ -511,8 +587,92 @@ class LangGraphRAGPipeline:
         return {
             "context": context,
             "answer": answer,
-            "sources": sources
+            "sources": sources,
+            "rewrite_count": state.get("rewrite_count", 0)  # Rewrite 카운트 유지
         }
+    
+    def _evaluate_answer_node(self, state: CRAGState) -> dict:
+        """
+        생성된 답변의 품질 평가 노드
+        
+        평가 기준:
+        - 질문에 직접 답변했는가?
+        - 정보가 충분한가?
+        - 명확하고 이해하기 쉬운가?
+        """
+        question = state["question"]
+        answer = state["answer"]
+        
+        if self.debug:
+            print("\n" + "="*80)
+            print("📍 [5/5] EVALUATE ANSWER NODE - 답변 품질 평가")
+            print("="*80)
+            print(f"❓ 질문: {question}")
+            print(f"📝 답변: {answer[:150].replace(chr(10), ' ')}...\n")
+        
+        # 평가 프롬프트
+        evaluation_prompt = ChatPromptTemplate.from_messages([
+            ("system", """당신은 AI 답변의 품질을 평가하는 전문가입니다.
+            
+평가 기준:
+1. 질문에 직접 답변했는가? (답변이 질문의 주요 내용을 다루고 있는가?)
+2. 정보가 충분한가? (필요한 세부사항이 포함되어 있는가?)
+3. 명확하고 이해하기 쉬운가? (논리적이고 구조화되어 있는가?)
+
+답변을 평가하고 'PASS' 또는 'FAIL'로 판정하세요.
+만약 FAIL이면 개선할 점을 간단히 기술하세요."""),
+            ("human", """질문: {question}
+
+답변: {answer}
+
+평가 결과 (PASS/FAIL)와 이유를 제시하세요.""")
+        ])
+        
+        # 구조화된 출력 설정
+        class AnswerEvaluation(BaseModel):
+            quality_score: str = Field(description="PASS 또는 FAIL")
+            reason: str = Field(description="평가 사유")
+        
+        evaluator = self.grader_llm.with_structured_output(AnswerEvaluation)
+        chain = evaluation_prompt | evaluator
+        
+        evaluation = chain.invoke({
+            "question": question,
+            "answer": answer
+        })
+        
+        quality = evaluation.quality_score.upper()
+        if "PASS" in quality:
+            quality = "pass"
+        else:
+            quality = "fail"
+        
+        if self.debug:
+            print(f"⭐ 평가 결과: {quality.upper()}")
+            print(f"📌 평가 사유: {evaluation.reason}\n")
+        
+        return {
+            "answer_quality": quality,
+            "answer_quality_reason": evaluation.reason,
+            "rewrite_count": state.get("rewrite_count", 0)
+        }
+    
+    def _decide_after_evaluation(self, state: CRAGState) -> Literal["end", "rewrite"]:
+        """
+        평가 결과에 따라 최종 답변 또는 재작성 결정
+        """
+        quality = state.get("answer_quality", "fail")
+        rewrite_count = state.get("rewrite_count", 0)
+        max_rewrites = 2  # 최대 2회 재작성
+        
+        if self.debug:
+            print(f"\n🔀 평가 결과 라우팅 - Quality: {quality}, Rewrites: {rewrite_count}/{max_rewrites}")
+        
+        # PASS 또는 최대 재작성 횟수 도달 시 종료
+        if quality == "pass" or rewrite_count >= max_rewrites:
+            return "end"
+        else:
+            return "rewrite"
     
     def _format_docs(self, docs: List[Document]) -> str:
         """검색된 문서들을 문자열로 포맷팅 (웹 검색 결과 구분)"""
@@ -617,7 +777,10 @@ class LangGraphRAGPipeline:
                 "context": "",
                 "answer": "",
                 "grade_results": [],
-                "sources": []
+                "sources": [],
+                "answer_quality": "fail",  # 평가 초기값
+                "answer_quality_reason": "",
+                "rewrite_count": 0  # Rewrite 카운트
             }
             
             result = self.app.invoke(initial_state)

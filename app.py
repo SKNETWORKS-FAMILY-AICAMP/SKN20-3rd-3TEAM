@@ -25,6 +25,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.embeddings import get_embedding_model, load_vectorstore
 from src.retrieval import create_retriever
 from src.pipeline import LangGraphRAGPipeline
+from src.question_classifier import QuestionClassifier, QuestionType
+from src.advanced_rag_pipeline import AdvancedRAGPipeline
 from src.kakao_map import HospitalMapper
 from src.hospital_web_search import (
     HospitalWebSearcher,
@@ -123,13 +125,14 @@ st.markdown("""
 @st.cache_resource
 def initialize_rag_pipeline():
     """
-    RAG 파이프라인 초기화 (Streamlit 캐시 사용)
+    통합 RAG 파이프라인 초기화 (Streamlit 캐시 사용)
+    의도 분류 기반 유형별 처리
     
     Returns:
-        RAG 파이프라인 객체
+        통합 파이프라인 객체
     """
     try:
-        with st.spinner("🔄 RAG 시스템 초기화 중..."):
+        with st.spinner("🔄 AI 시스템 초기화 중..."):
             # 1. 임베딩 모델 로드
             embedding_model = get_embedding_model("openai")
             
@@ -140,26 +143,20 @@ def initialize_rag_pipeline():
                 collection_name="rag_collection"
             )
             
-            # 3. Retriever 생성
-            retriever = create_retriever(
-                vectorstore,
-                top_k=5
-            )
-            
-            # 4. LangGraph CRAG 파이프라인 생성 (디버그 로그 비활성화)
-            pipeline = LangGraphRAGPipeline(
-                retriever,
+            # 3. 통합 파이프라인 생성 (의료/병원/일반 질문 유형별 처리)
+            pipeline = AdvancedRAGPipeline(
+                vectorstore=vectorstore,
+                hospital_json_path="data/raw/hospital/서울시_동물병원_인허가_정보.json",
                 llm_model="gpt-4o-mini",
-                temperature=0.0,
-                debug=False  # Streamlit 환경에서는 디버그 로그 비활성화
+                score_threshold=0.6
             )
             
-        st.success("✅ RAG 시스템 준비 완료!")
+        st.success("✅ AI 시스템 준비 완료!")
         return pipeline
     
     except Exception as e:
-        st.error(f"❌ RAG 시스템 초기화 실패: {str(e)}")
-        logger.error(f"RAG initialization error: {str(e)}")
+        st.error(f"❌ AI 시스템 초기화 실패: {str(e)}")
+        logger.error(f"Pipeline initialization error: {str(e)}")
         return None
 
 
@@ -200,6 +197,10 @@ def initialize_session_state():
     # 웹 검색으로 찾은 병원 정보
     if "searched_hospital_info" not in st.session_state:
         st.session_state.searched_hospital_info = None
+    
+    # 질문 분류 정보
+    if "question_classification" not in st.session_state:
+        st.session_state.question_classification = None
 
 
 # ==================== 채팅 표시 함수 ====================
@@ -266,13 +267,13 @@ def display_chat_history():
 
 # ==================== 질문 처리 함수 ====================
 
-def process_question(question: str, pipeline: LangGraphRAGPipeline) -> Dict[str, Any]:
+def process_question(question: str, pipeline: AdvancedRAGPipeline) -> Dict[str, Any]:
     """
-    질문을 처리하고 답변 생성
+    질문을 의도 분류하고 유형별로 처리
     
     Args:
         question: 사용자 질문
-        pipeline: RAG 파이프라인
+        pipeline: 통합 RAG 파이프라인
         
     Returns:
         답변 및 메타데이터 딕셔너리
@@ -280,10 +281,32 @@ def process_question(question: str, pipeline: LangGraphRAGPipeline) -> Dict[str,
     try:
         with st.spinner("🔄 답변을 생성 중입니다..."):
             start_time = time.time()
-            result = pipeline.rag_pipeline_with_sources(question)
-            elapsed_time = time.time() - start_time
             
+            # 1. 질문 분류 (의료/병원/일반)
+            q_type, confidence, reason = pipeline.classifier.classify(question)
+            
+            st.session_state.question_classification = {
+                'type': q_type.value,
+                'type_name': {'A': '의료', 'B': '병원/지도', 'C': '일반'}.get(q_type.value, '기타'),
+                'confidence': confidence,
+                'reason': reason
+            }
+            
+            # 2. 유형별 처리
+            if q_type == QuestionType.MEDICAL:
+                # 의료 질문 → RAG 파이프라인
+                result = pipeline.medical_handler.handle_medical_question(question)
+            elif q_type == QuestionType.HOSPITAL:
+                # 병원/지도 질문 → 병원 핸들러
+                result = pipeline.hospital_handler.handle_hospital_question(question)
+            else:
+                # 일반 질문 → 일반 QA
+                result = pipeline._handle_general_question(question)
+            
+            elapsed_time = time.time() - start_time
             result['elapsed_time'] = elapsed_time
+            result['classification'] = st.session_state.question_classification
+            
             return result
     
     except Exception as e:
@@ -291,13 +314,15 @@ def process_question(question: str, pipeline: LangGraphRAGPipeline) -> Dict[str,
         return {
             'answer': f"❌ 오류 발생: {str(e)}",
             'sources': [],
-            'elapsed_time': 0
+            'elapsed_time': 0,
+            'classification': {'type': 'error', 'error': str(e)}
         }
 
 
 def handle_question_submission():
     """
     질문 제출 핸들러
+    의도 분류 결과에 따라 적절한 처리 수행
     """
     question = st.session_state.user_input.strip()
     
@@ -307,22 +332,8 @@ def handle_question_submission():
     
     # 파이프라인 초기화 확인
     if st.session_state.pipeline is None:
-        st.error("❌ RAG 시스템이 준비되지 않았습니다.")
+        st.error("❌ AI 시스템이 준비되지 않았습니다.")
         return
-    
-    # 질문에서 병원 이름과 위치 추출
-    hospital_name = extract_hospital_name_from_question(question)
-    location = extract_location_from_question(question)
-    
-    # 병원 정보 검색 (질문에 병원 이름이 있을 경우)
-    hospital_info = None
-    if hospital_name:
-        with st.spinner(f"🔍 {hospital_name} 정보를 검색 중입니다..."):
-            hospital_info = st.session_state.hospital_searcher.search_hospital_info(
-                hospital_name, location
-            )
-            if hospital_info.get('found'):
-                st.session_state.searched_hospital_info = hospital_info
     
     # 대화 기록에 사용자 질문 추가
     st.session_state.chat_history.append({
@@ -331,8 +342,12 @@ def handle_question_submission():
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     })
     
-    # 질문 처리
+    # 질문 처리 (의도 분류 기반 유형별 처리)
     result = process_question(question, st.session_state.pipeline)
+    
+    # 병원/지도 질문인 경우 카카오맵 자동 표시
+    if result.get('classification', {}).get('type') == 'B':
+        st.session_state.show_hospital_map = True
     
     # 대화 기록에 AI 답변 추가
     st.session_state.chat_history.append({
@@ -341,12 +356,13 @@ def handle_question_submission():
         "sources": result.get('sources', []),
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "elapsed_time": result.get('elapsed_time', 0),
+        "question_type": result.get('classification', {}).get('type_name', '기타'),
         "debug_info": {
+            "question_type": result.get('classification', {}),
             "document_scores": result.get('document_scores', []),
             "grade_results": result.get('grade_results', []),
-            "web_search_needed": result.get('web_search_needed', 'No')
-        },
-        "hospital_info": hospital_info
+            "web_search_needed": result.get('web_search_needed', 'N/A')
+        }
     })
     
     # 입력 필드 초기화
@@ -564,32 +580,27 @@ def display_debug_info(message: Dict):
     with st.expander("🐛 디버그 정보"):
         col1, col2, col3 = st.columns(3)
         
-        # 문서 유사도 점수
+        # 질문 분류 정보
         with col1:
+            q_type_info = debug_info.get('question_type', {})
+            if q_type_info:
+                st.markdown("**🎯 질문 분류:**")
+                st.markdown(f"  유형: {q_type_info.get('type_name', 'N/A')}")
+                st.markdown(f"  신뢰도: {q_type_info.get('confidence', 0):.1%}")
+        
+        # 문서 유사도 점수
+        with col2:
             doc_scores = debug_info.get('document_scores', [])
             if doc_scores:
                 st.markdown("**📊 Similarity Scores:**")
-                for i, score in enumerate(doc_scores[:5], 1):
+                for i, score in enumerate(doc_scores[:3], 1):
                     st.markdown(f"  {i}. {score:.4f}")
-        
-        # 관련성 판정 결과
-        with col2:
-            grade_results = debug_info.get('grade_results', [])
-            if grade_results:
-                yes_count = sum(1 for g in grade_results if g == 'YES')
-                no_count = sum(1 for g in grade_results if g == 'NO')
-                st.markdown("**✓ 관련성 판정:**")
-                st.markdown(f"  관련있음: {yes_count}개")
-                st.markdown(f"  관련없음: {no_count}개")
         
         # 웹 검색 여부
         with col3:
-            web_search_needed = debug_info.get('web_search_needed', 'No')
+            web_search = debug_info.get('web_search_needed', 'N/A')
             st.markdown("**🌐 웹 검색:**")
-            if web_search_needed == 'Yes':
-                st.markdown("  ✓ 실행됨")
-            else:
-                st.markdown("  ✗ 미실행")
+            st.markdown(f"  {web_search}")
 
 
 # ==================== 메인 앱 ====================
