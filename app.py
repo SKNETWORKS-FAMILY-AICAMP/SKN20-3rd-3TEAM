@@ -1,684 +1,425 @@
 """
-Streamlit 기반 RAG 웹 애플리케이션
-LangGraph CRAG 파이프라인을 Streamlit UI와 통합
+Streamlit 기본 RAG 웹 애플리케이션
+==================================
+공통 모듈을 사용한 기본 RAG 채팅 앱
 
-사용법:
-  streamlit run app.py
+실행: streamlit run app.py
 """
 
+import streamlit as st
 import os
-import sys
-from pathlib import Path
-from typing import Dict, Any, List
-import time
-
-# 환경변수 로드
+from datetime import datetime
 from dotenv import load_dotenv
+
+# 공통 모듈 import
+from common.utils import setup_logging
+from common.config import CommonConfig, get_config
+from common.extensions.embeddings import OpenAIEmbeddingModel
+from common.extensions.vectorstores import ChromaVectorStore
+from common.extensions.retrievers import SimpleTopKRetriever
+from common.extensions.llm_clients import OpenAILLMClient
+from common.pipelines import SimpleRAGPipeline
+
+# 환경 변수 로드
 load_dotenv()
 
-# Streamlit 임포트
-import streamlit as st
-from streamlit.logger import get_logger
+# 로깅 설정
+logger = setup_logging()
 
-# 프로젝트 모듈 임포트
-sys.path.insert(0, str(Path(__file__).parent))
-from src.embeddings import get_embedding_model, load_vectorstore
-from src.retrieval import create_retriever
-from src.pipeline import LangGraphRAGPipeline
-from src.question_classifier import QuestionClassifier, QuestionType
-from src.advanced_rag_pipeline import AdvancedRAGPipeline
-from src.kakao_map import HospitalMapper
-from src.hospital_web_search import (
-    HospitalWebSearcher,
-    extract_hospital_name_from_question,
-    extract_location_from_question
-)
-
-# 로거 설정
-logger = get_logger(__name__)
-
-# ==================== 페이지 설정 ====================
+# ============ Streamlit 페이지 설정 ============
 st.set_page_config(
     page_title="🏥 의료 RAG 챗봇",
-    page_icon="🏥",
+    page_icon="🤖",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # 커스텀 CSS
 st.markdown("""
 <style>
-    /* 메인 컨테이너 */
     .main {
-        max-width: 1200px;
+        padding: 2rem;
     }
-    
-    /* 채팅 메시지 스타일 */
-    .chat-user {
-        background-color: #E3F2FD;
-        padding: 12px 16px;
-        border-radius: 12px;
-        margin: 10px 0;
+    .chat-message {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        display: flex;
+        gap: 1rem;
+    }
+    .user-message {
+        background-color: #e3f2fd;
         border-left: 4px solid #2196F3;
     }
-    
-    .chat-assistant {
-        background-color: #F5F5F5;
-        padding: 12px 16px;
-        border-radius: 12px;
-        margin: 10px 0;
+    .assistant-message {
+        background-color: #f5f5f5;
         border-left: 4px solid #4CAF50;
     }
-    
-    .chat-timestamp {
-        font-size: 0.8em;
-        color: #999;
-        margin-top: 4px;
-    }
-    
-    /* 소스 정보 */
     .source-box {
-        background-color: #FFF3E0;
-        padding: 12px;
-        border-radius: 8px;
-        margin: 8px 0;
-        border-left: 4px solid #FF9800;
-        font-size: 0.9em;
+        background-color: #fffde7;
+        border-left: 4px solid #FBC02D;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-top: 0.5rem;
     }
-    
-    /* 버튼 스타일 */
-    .stButton > button {
-        width: 100%;
-        height: 40px;
-        font-size: 1em;
-        border-radius: 8px;
-    }
-    
-    /* 메트릭 카드 */
-    .metric-card {
-        background-color: #F9F9F9;
-        padding: 16px;
-        border-radius: 8px;
-        border: 1px solid #E0E0E0;
-        margin: 10px 0;
-    }
-    
-    /* 에러 메시지 */
-    .error-message {
-        background-color: #FFEBEE;
-        color: #C62828;
-        padding: 12px;
-        border-radius: 8px;
-        border-left: 4px solid #C62828;
-    }
-    
-    /* 로딩 상태 */
-    .loading-indicator {
+    .metric-box {
+        background-color: #f3e5f5;
+        padding: 1rem;
+        border-radius: 0.5rem;
         text-align: center;
-        color: #1976D2;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ==================== 초기화 함수 ====================
-
-@st.cache_resource
-def initialize_rag_pipeline():
-    """
-    통합 RAG 파이프라인 초기화 (Streamlit 캐시 사용)
-    의도 분류 기반 유형별 처리
-    
-    Returns:
-        통합 파이프라인 객체
-    """
-    try:
-        with st.spinner("🔄 AI 시스템 초기화 중..."):
-            # 1. 임베딩 모델 로드
-            embedding_model = get_embedding_model("openai")
-            
-            # 2. 벡터스토어 로드
-            vectorstore = load_vectorstore(
-                embedding_model,
-                persist_directory="./chroma_db",
-                collection_name="rag_collection"
-            )
-            
-            # 3. 통합 파이프라인 생성 (의료/병원/일반 질문 유형별 처리)
-            pipeline = AdvancedRAGPipeline(
-                vectorstore=vectorstore,
-                hospital_json_path="data/raw/hospital/서울시_동물병원_인허가_정보.json",
-                llm_model="gpt-4o-mini",
-                score_threshold=0.6
-            )
-            
-        st.success("✅ AI 시스템 준비 완료!")
-        return pipeline
-    
-    except Exception as e:
-        st.error(f"❌ AI 시스템 초기화 실패: {str(e)}")
-        logger.error(f"Pipeline initialization error: {str(e)}")
-        return None
-
-
+# ============ 세션 상태 초기화 ============
 def initialize_session_state():
-    """
-    Streamlit 세션 상태 초기화
-    """
-    # 대화 기록
+    """세션 상태 초기화"""
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
     
-    # RAG 파이프라인
     if "pipeline" not in st.session_state:
         st.session_state.pipeline = None
     
-    # UI 상태
+    if "config" not in st.session_state:
+        st.session_state.config = CommonConfig()
+    
     if "show_sources" not in st.session_state:
         st.session_state.show_sources = True
     
     if "show_debug_info" not in st.session_state:
         st.session_state.show_debug_info = False
     
-    # 카카오맵 상태
-    if "show_hospital_map" not in st.session_state:
-        st.session_state.show_hospital_map = False
-    
-    if "hospital_mapper" not in st.session_state:
-        try:
-            st.session_state.hospital_mapper = HospitalMapper()
-        except Exception as e:
-            logger.warning(f"HospitalMapper initialization warning: {str(e)}")
-            st.session_state.hospital_mapper = None
-    
-    # 병원 웹 검색기
-    if "hospital_searcher" not in st.session_state:
-        st.session_state.hospital_searcher = HospitalWebSearcher()
-    
-    # 웹 검색으로 찾은 병원 정보
-    if "searched_hospital_info" not in st.session_state:
-        st.session_state.searched_hospital_info = None
-    
-    # 질문 분류 정보
-    if "question_classification" not in st.session_state:
-        st.session_state.question_classification = None
+    if "stats" not in st.session_state:
+        st.session_state.stats = {
+            "total_queries": 0,
+            "successful_queries": 0,
+            "total_time": 0.0,
+        }
 
 
-# ==================== 채팅 표시 함수 ====================
-
-def display_chat_message(role: str, content: str, timestamp: str = None, sources: List[Dict] = None):
-    """
-    채팅 메시지를 화면에 표시
-    
-    Args:
-        role: "user" 또는 "assistant"
-        content: 메시지 내용
-        timestamp: 메시지 타임스탬프 (선택사항)
-        sources: 답변의 출처 정보 (assistant일 때만)
-    """
-    if role == "user":
-        st.markdown(f"""
-        <div class="chat-user">
-            <strong>👤 당신:</strong><br>
-            {content}
-        </div>
-        """, unsafe_allow_html=True)
-    
-    elif role == "assistant":
-        st.markdown(f"""
-        <div class="chat-assistant">
-            <strong>🤖 AI 어시스턴트:</strong><br>
-            {content}
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # 출처 정보 표시
-        if sources and len(sources) > 0:
-            with st.expander(f"📚 참고한 문서 ({len(sources)}개)"):
-                for i, source in enumerate(sources, 1):
-                    col1, col2 = st.columns([1, 3])
-                    with col1:
-                        st.markdown(f"**[{i}]**")
-                    with col2:
-                        source_type = source.get('type', 'internal')
-                        type_icon = '🌐' if source_type == 'web' else '📄'
-                        st.markdown(f"""
-                        {type_icon} **{source.get('file_name', 'Unknown')}**
-                        - 부서: {source.get('department', 'N/A')}
-                        - 제목: {source.get('title', 'N/A')}
-                        """)
+initialize_session_state()
 
 
-def display_chat_history():
-    """
-    저장된 대화 기록 표시
-    """
-    if not st.session_state.chat_history:
-        st.info("💬 아직 대화가 없습니다. 질문을 입력해주세요!")
-        return
-    
-    for message in st.session_state.chat_history:
-        role = message.get("role")
-        content = message.get("content")
-        timestamp = message.get("timestamp")
-        sources = message.get("sources", [])
-        
-        display_chat_message(role, content, timestamp, sources)
-
-
-# ==================== 질문 처리 함수 ====================
-
-def process_question(question: str, pipeline: AdvancedRAGPipeline) -> Dict[str, Any]:
-    """
-    질문을 의도 분류하고 유형별로 처리
-    
-    Args:
-        question: 사용자 질문
-        pipeline: 통합 RAG 파이프라인
-        
-    Returns:
-        답변 및 메타데이터 딕셔너리
-    """
+# ============ RAG 파이프라인 초기화 ============
+@st.cache_resource
+def initialize_pipeline():
+    """RAG 파이프라인 초기화 (캐시됨)"""
     try:
-        with st.spinner("🔄 답변을 생성 중입니다..."):
-            start_time = time.time()
+        with st.spinner("🔄 RAG 시스템 초기화 중..."):
+            logger.info("RAG 시스템 초기화 시작")
             
-            # 1. 질문 분류 (의료/병원/일반)
-            q_type, confidence, reason = pipeline.classifier.classify(question)
+            # 임베딩 모델 초기화
+            st.status("📚 임베딩 모델 로드 중...", state="running")
+            embedding = OpenAIEmbeddingModel(
+                model_name="text-embedding-3-small"
+            )
+            st.status("📚 임베딩 모델 완료", state="complete")
             
-            st.session_state.question_classification = {
-                'type': q_type.value,
-                'type_name': {'A': '의료', 'B': '병원/지도', 'C': '일반'}.get(q_type.value, '기타'),
-                'confidence': confidence,
-                'reason': reason
-            }
+            # 벡터 저장소 초기화
+            st.status("💾 벡터 저장소 로드 중...", state="running")
+            vectorstore = ChromaVectorStore(
+                embedding_model=embedding,
+                persist_directory="./chroma_db",
+                collection_name="medical_documents"
+            )
+            st.status("💾 벡터 저장소 완료", state="complete")
             
-            # 2. 유형별 처리
-            if q_type == QuestionType.MEDICAL:
-                # 의료 질문 → RAG 파이프라인
-                result = pipeline.medical_handler.handle_medical_question(question)
-            elif q_type == QuestionType.HOSPITAL:
-                # 병원/지도 질문 → 병원 핸들러
-                result = pipeline.hospital_handler.handle_hospital_question(question)
-            else:
-                # 일반 질문 → 일반 QA
-                result = pipeline._handle_general_question(question)
+            # 검색기 초기화
+            st.status("🔍 검색기 초기화 중...", state="running")
+            retriever = SimpleTopKRetriever(
+                vector_store=vectorstore,
+                top_k=5
+            )
+            st.status("🔍 검색기 완료", state="complete")
             
-            elapsed_time = time.time() - start_time
-            result['elapsed_time'] = elapsed_time
-            result['classification'] = st.session_state.question_classification
+            # LLM 클라이언트 초기화
+            st.status("🤖 LLM 클라이언트 초기화 중...", state="running")
+            llm_client = OpenAILLMClient(
+                model_name="gpt-4o-mini",
+                temperature=0.7
+            )
+            st.status("🤖 LLM 완료", state="complete")
             
-            return result
+            # 파이프라인 생성
+            st.status("⚙️ 파이프라인 구성 중...", state="running")
+            pipeline = SimpleRAGPipeline(
+                retriever=retriever,
+                embedding_model=embedding,
+                vector_store=vectorstore,
+                llm_client=llm_client,
+                config=st.session_state.config.pipeline,
+            )
+            st.status("⚙️ 파이프라인 완료", state="complete")
+            
+            logger.info("✅ RAG 시스템 초기화 완료")
+            st.success("✅ RAG 시스템 준비 완료!")
+            
+            return pipeline
     
     except Exception as e:
-        logger.error(f"Question processing error: {str(e)}")
-        return {
-            'answer': f"❌ 오류 발생: {str(e)}",
-            'sources': [],
-            'elapsed_time': 0,
-            'classification': {'type': 'error', 'error': str(e)}
-        }
+        logger.error(f"❌ 초기화 오류: {e}")
+        st.error(f"❌ 초기화 실패: {e}")
+        return None
 
 
-def handle_question_submission():
-    """
-    질문 제출 핸들러
-    의도 분류 결과에 따라 적절한 처리 수행
-    """
-    question = st.session_state.user_input.strip()
+# ============ 메시지 표시 함수 ============
+def display_chat_message(role: str, content: str, sources: list = None, elapsed_time: float = None):
+    """채팅 메시지 표시"""
+    if role == "user":
+        st.markdown(f"""
+        <div class="chat-message user-message">
+            <div style="flex: 1;">
+                <strong>👤 You</strong>
+                <p>{content}</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    if not question:
-        st.warning("⚠️ 질문을 입력해주세요!")
+    else:  # assistant
+        st.markdown(f"""
+        <div class="chat-message assistant-message">
+            <div style="flex: 1;">
+                <strong>🤖 AI Assistant</strong>
+                <p>{content}</p>
+                {f'<small>⏱️ {elapsed_time:.2f}s</small>' if elapsed_time else ''}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # 출처 표시
+        if sources and st.session_state.show_sources:
+            with st.expander(f"📚 참고한 문서 ({len(sources)}개)"):
+                for i, source in enumerate(sources, 1):
+                    st.markdown(f"""
+                    **[{i}] {source.get('title', 'Unknown')}**
+                    - 유사도: {source.get('similarity_score', 0):.2%}
+                    """)
+
+
+# ============ 질문 처리 함수 ============
+def process_question(question: str):
+    """사용자 질문 처리"""
+    if not question.strip():
+        st.warning("⚠️ 질문을 입력해주세요")
         return
     
-    # 파이프라인 초기화 확인
     if st.session_state.pipeline is None:
-        st.error("❌ AI 시스템이 준비되지 않았습니다.")
+        st.error("❌ 파이프라인이 초기화되지 않았습니다")
         return
     
-    # 대화 기록에 사용자 질문 추가
-    st.session_state.chat_history.append({
-        "role": "user",
-        "content": question,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-    })
+    try:
+        # 사용자 메시지 추가
+        st.session_state.chat_history.append({
+            "role": "user",
+            "content": question,
+            "timestamp": datetime.now().isoformat(),
+        })
+        
+        # 답변 생성
+        with st.spinner("🔄 답변을 생성 중입니다..."):
+            logger.info(f"질문 처리: {question}")
+            
+            response = st.session_state.pipeline.process(
+                question,
+                top_k=5,
+            )
+            
+            # 응답 정보 추출
+            answer = response['answer']
+            sources = response['sources']
+            elapsed_time = float(response['metrics']['total_time'].rstrip('s'))
+            
+            # AI 메시지 추가
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": answer,
+                "sources": sources,
+                "elapsed_time": elapsed_time,
+                "timestamp": datetime.now().isoformat(),
+                "debug_info": response.get('debug_info', {}),
+            })
+            
+            # 통계 업데이트
+            st.session_state.stats["total_queries"] += 1
+            st.session_state.stats["successful_queries"] += 1
+            st.session_state.stats["total_time"] += elapsed_time
+            
+            logger.info(f"✅ 답변 생성 완료 ({elapsed_time:.2f}초)")
+        
+        # 화면 갱신
+        st.rerun()
     
-    # 질문 처리 (의도 분류 기반 유형별 처리)
-    result = process_question(question, st.session_state.pipeline)
-    
-    # 병원/지도 질문인 경우 카카오맵 자동 표시
-    if result.get('classification', {}).get('type') == 'B':
-        st.session_state.show_hospital_map = True
-    
-    # 대화 기록에 AI 답변 추가
-    st.session_state.chat_history.append({
-        "role": "assistant",
-        "content": result.get('answer', '답변을 생성할 수 없습니다.'),
-        "sources": result.get('sources', []),
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "elapsed_time": result.get('elapsed_time', 0),
-        "question_type": result.get('classification', {}).get('type_name', '기타'),
-        "debug_info": {
-            "question_type": result.get('classification', {}),
-            "document_scores": result.get('document_scores', []),
-            "grade_results": result.get('grade_results', []),
-            "web_search_needed": result.get('web_search_needed', 'N/A')
-        }
-    })
-    
-    # 입력 필드 초기화
-    st.session_state.user_input = ""
+    except Exception as e:
+        logger.error(f"❌ 질문 처리 오류: {e}")
+        st.error(f"❌ 오류 발생: {e}")
 
 
-# ==================== 사이드바 설정 ====================
-
+# ============ 사이드바 설정 ============
 def render_sidebar():
-    """
-    사이드바 렌더링
-    """
+    """사이드바 UI 구성"""
     with st.sidebar:
         st.title("⚙️ 설정")
         
-        # 시스템 정보
-        st.subheader("🔧 시스템 상태")
+        # 시스템 상태
+        st.subheader("📊 시스템 상태")
         if st.session_state.pipeline:
             st.success("✅ RAG 시스템 준비됨")
         else:
-            st.error("❌ RAG 시스템 준비 중...")
+            st.error("❌ RAG 시스템 미준비")
+        
+        st.divider()
         
         # 표시 옵션
-        st.subheader("📋 표시 옵션")
+        st.subheader("👁️ 표시 옵션")
         st.session_state.show_sources = st.checkbox(
-            "출처 정보 표시",
-            value=st.session_state.show_sources
+            "출처 표시",
+            value=st.session_state.show_sources,
         )
         st.session_state.show_debug_info = st.checkbox(
             "디버그 정보 표시",
-            value=st.session_state.show_debug_info
+            value=st.session_state.show_debug_info,
         )
+        
+        st.divider()
         
         # 대화 관리
         st.subheader("💬 대화 관리")
         col1, col2 = st.columns(2)
+        
         with col1:
-            if st.button("🗑️ 대화 초기화", use_container_width=True):
-                st.session_state.chat_history = []
+            if st.button("🔄 새로고침"):
                 st.rerun()
         
         with col2:
-            if st.button("📊 통계", use_container_width=True):
-                st.session_state.show_stats = True
+            if st.button("🗑️ 초기화"):
+                st.session_state.chat_history = []
+                st.session_state.stats = {
+                    "total_queries": 0,
+                    "successful_queries": 0,
+                    "total_time": 0.0,
+                }
+                st.success("✅ 초기화 완료")
+                st.rerun()
+        
+        st.divider()
+        
+        # 통계
+        st.subheader("📈 대화 통계")
+        stats = st.session_state.stats
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown(f"""
+            <div class="metric-box">
+                <h3>{stats['total_queries']}</h3>
+                <p>총 질문</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            success_rate = (
+                stats['successful_queries'] / max(1, stats['total_queries']) * 100
+            )
+            st.markdown(f"""
+            <div class="metric-box">
+                <h3>{success_rate:.0f}%</h3>
+                <p>성공률</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            avg_time = (
+                stats['total_time'] / max(1, stats['total_queries'])
+            )
+            st.markdown(f"""
+            <div class="metric-box">
+                <h3>{avg_time:.2f}s</h3>
+                <p>평균 시간</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.divider()
         
         # 도움말
         st.subheader("❓ 도움말")
-        st.markdown("""
-        ### 사용 방법
-        1. **질문 입력**: 아래 텍스트 상자에 질문을 입력하세요
-        2. **제출**: '질문 제출' 버튼을 클릭하세요
-        3. **답변 확인**: AI의 답변과 참고 문서를 확인하세요
+        st.info("""
+        **사용 방법:**
+        1. 질문을 입력하세요
+        2. 📤 제출 버튼을 클릭
+        3. AI의 답변을 확인
+        4. 출처 정보 확인
         
-        ### 팁
-        - 구체적이고 명확한 질문이 더 정확한 답변을 생성합니다
-        - 의료 관련 질문에 최적화되어 있습니다
-        - 내부 문서에 없는 정보는 웹 검색으로 자동 보완됩니다
+        **팁:**
+        - 구체적인 질문이 더 좋은 답변을 생성합니다
+        - 출처를 확인하여 정보의 신뢰성을 검증하세요
         """)
-        
-        # 예시 질문
-        st.subheader("💡 예시 질문")
-        example_questions = [
-            "강아지 피부 질환의 증상은 무엇인가요?",
-            "벼룩 알러지성 피부염 치료법을 알려주세요",
-            "개의 혈액형에 대해 설명해주세요",
-            "면역 체계 질환의 종류는?",
-        ]
-        
-        for example in example_questions:
-            if st.button(f"💬 {example}", use_container_width=True, key=f"example_{example}"):
-                st.session_state.user_input = example
-                st.rerun()
 
 
-# ==================== 통계 표시 ====================
-
-def display_statistics():
-    """
-    대화 통계 표시
-    """
-    if not st.session_state.chat_history:
-        st.info("📊 아직 통계 데이터가 없습니다.")
-        return
-    
-    col1, col2, col3 = st.columns(3)
-    
-    # 질문 수
-    num_questions = sum(1 for msg in st.session_state.chat_history if msg['role'] == 'user')
-    with col1:
-        st.metric("❓ 총 질문 수", num_questions)
-    
-    # 평균 응답 시간
-    response_times = [msg.get('elapsed_time', 0) for msg in st.session_state.chat_history 
-                     if msg['role'] == 'assistant']
-    avg_time = sum(response_times) / len(response_times) if response_times else 0
-    with col2:
-        st.metric("⏱️ 평균 응답 시간", f"{avg_time:.2f}초")
-    
-    # 웹 검색 사용 횟수
-    web_search_count = sum(1 for msg in st.session_state.chat_history 
-                          if msg['role'] == 'assistant' 
-                          and msg.get('debug_info', {}).get('web_search_needed') == 'Yes')
-    with col3:
-        st.metric("🌐 웹 검색 사용 횟수", web_search_count)
-
-
-# ==================== 카카오맵 표시 ====================
-
-def display_hospital_map(hospitals: List[Dict] = None, show_searched: bool = True):
-    """
-    병원 정보를 카카오맵으로 표시
-    
-    Args:
-        hospitals: 병원 정보 리스트
-        show_searched: 검색된 병원 정보 표시 여부
-    """
-    if st.session_state.hospital_mapper is None:
-        st.warning("⚠️ 카카오맵 API 키가 설정되지 않았습니다.")
-        return
-    
-    try:
-        # 첫 번째 탭: 검색된 병원 정보
-        if show_searched and st.session_state.searched_hospital_info:
-            tab1, tab2 = st.tabs(["🔍 검색 결과", "📍 전체 병원"])
-            
-            with tab1:
-                hospital_info = st.session_state.searched_hospital_info
-                st.markdown(f"### 🏥 {hospital_info['name']}")
-                
-                if hospital_info.get('address'):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.info(f"📍 **주소**: {hospital_info['address']}")
-                    with col2:
-                        if hospital_info.get('phone'):
-                            st.info(f"📞 **전화**: {hospital_info['phone']}")
-                        else:
-                            st.info("📞 **전화**: 정보 없음")
-                    
-                    # 검색된 주소로 맵 표시
-                    searched_hospital = {
-                        'name': hospital_info['name'],
-                        'address': hospital_info['address'],
-                        'phone': hospital_info.get('phone', ''),
-                        'lat': None,
-                        'lng': None
-                    }
-                else:
-                    st.warning("⚠️ 주소 정보를 찾을 수 없습니다. 전체 병원 목록을 확인해주세요.")
-            
-            with tab2:
-                _display_all_hospitals(hospitals)
-        else:
-            _display_all_hospitals(hospitals)
-        
-    except Exception as e:
-        st.error(f"❌ 카카오맵 표시 오류: {str(e)}")
-        logger.error(f"Hospital map display error: {str(e)}")
-
-
-def _display_all_hospitals(hospitals: List[Dict] = None):
-    """
-    전체 병원 목록 표시 (헬퍼 함수)
-    
-    Args:
-        hospitals: 병원 정보 리스트
-    """
-    if hospitals is None:
-        # CSV에서 병원 정보 로드
-        hospital_csv_path = Path(__file__).parent / "data" / "raw" / "hospital" / "서울시_동물병원_인허가_정보.json"
-        if not hospital_csv_path.exists():
-            st.error(f"❌ 병원 데이터 파일을 찾을 수 없습니다: {hospital_csv_path}")
-            return
-        
-        hospitals_data = st.session_state.hospital_mapper.load_hospitals_from_csv(str(hospital_csv_path))
-        hospitals = [st.session_state.hospital_mapper.get_hospital_info(h) for h in hospitals_data]
-    
-    if not hospitals:
-        st.warning("⚠️ 표시할 병원 정보가 없습니다.")
-        return
-    
-    st.subheader(f"🗺️ 동물병원 지도 ({len(hospitals)}개)")
-    
-    # 카카오맵 HTML 생성 및 표시
-    map_html = st.session_state.hospital_mapper.create_streamlit_html_component(hospitals)
-    st.components.v1.html(map_html, height=700)
-    
-    # 병원 목록 표시
-    with st.expander(f"📋 병원 목록 ({len(hospitals)}개)", expanded=False):
-        for i, hospital in enumerate(hospitals[:20]):  # 처음 20개만 표시
-            with st.container():
-                col1, col2, col3 = st.columns([2, 2, 1])
-                with col1:
-                    st.markdown(f"**{i+1}. {hospital['name']}**")
-                with col2:
-                    st.caption(hospital['address'][:40] + "..." if len(hospital['address']) > 40 else hospital['address'])
-                with col3:
-                    st.caption(hospital['phone'] if hospital['phone'] else "정보 없음")
-
-
-# ==================== 디버그 정보 표시 ====================
-
-def display_debug_info(message: Dict):
-    """
-    메시지의 디버그 정보 표시
-    
-    Args:
-        message: 대화 메시지
-    """
-    if message['role'] != 'assistant':
-        return
-    
-    debug_info = message.get('debug_info', {})
-    
-    with st.expander("🐛 디버그 정보"):
-        col1, col2, col3 = st.columns(3)
-        
-        # 질문 분류 정보
-        with col1:
-            q_type_info = debug_info.get('question_type', {})
-            if q_type_info:
-                st.markdown("**🎯 질문 분류:**")
-                st.markdown(f"  유형: {q_type_info.get('type_name', 'N/A')}")
-                st.markdown(f"  신뢰도: {q_type_info.get('confidence', 0):.1%}")
-        
-        # 문서 유사도 점수
-        with col2:
-            doc_scores = debug_info.get('document_scores', [])
-            if doc_scores:
-                st.markdown("**📊 Similarity Scores:**")
-                for i, score in enumerate(doc_scores[:3], 1):
-                    st.markdown(f"  {i}. {score:.4f}")
-        
-        # 웹 검색 여부
-        with col3:
-            web_search = debug_info.get('web_search_needed', 'N/A')
-            st.markdown("**🌐 웹 검색:**")
-            st.markdown(f"  {web_search}")
-
-
-# ==================== 메인 앱 ====================
-
+# ============ 메인 UI ============
 def main():
-    """
-    메인 애플리케이션 함수
-    """
-    # 세션 상태 초기화
-    initialize_session_state()
-    
-    # 사이드바 렌더링
-    render_sidebar()
+    """메인 페이지"""
     
     # 헤더
     st.title("🏥 의료 RAG 챗봇")
-    st.markdown("""
-    **Retrieval-Augmented Generation (RAG) 기반 의료 QA 시스템**
-    
-    이 애플리케이션은 동물 의료 관련 질문에 대해 내부 문서와 웹 검색을 활용한 
-    정확한 답변을 제공합니다.
-    """)
-    
-    # RAG 파이프라인 초기화
-    if st.session_state.pipeline is None:
-        st.session_state.pipeline = initialize_rag_pipeline()
-    
-    # 대화 영역
-    st.subheader("💬 대화")
-    
-    # 대화 기록 표시
-    display_chat_history()
-    
-    # 구분선
+    st.markdown("**공통 모듈 기반 RAG 시스템**")
     st.divider()
     
-    # 입력 영역
+    # 사이드바
+    render_sidebar()
+    
+    # 파이프라인 초기화
+    st.session_state.pipeline = initialize_pipeline()
+    
+    # 대화 표시
+    st.subheader("💬 대화")
+    
+    # 채팅 기록 표시
+    if st.session_state.chat_history:
+        for message in st.session_state.chat_history:
+            if message["role"] == "user":
+                display_chat_message(
+                    "user",
+                    message["content"]
+                )
+            else:
+                display_chat_message(
+                    "assistant",
+                    message["content"],
+                    sources=message.get("sources", []),
+                    elapsed_time=message.get("elapsed_time"),
+                )
+                
+                # 디버그 정보 표시 (선택사항)
+                if st.session_state.show_debug_info and message.get("debug_info"):
+                    with st.expander("🐛 디버그 정보"):
+                        debug_info = message["debug_info"]
+                        st.json(debug_info)
+    else:
+        st.info("💡 질문을 입력하여 시작하세요!")
+    
+    st.divider()
+    
+    # 질문 입력
     st.subheader("📝 질문 입력")
     
-    col1, col2 = st.columns([4, 1])
+    col1, col2 = st.columns([0.85, 0.15])
+    
     with col1:
-        user_input = st.text_input(
+        question = st.text_input(
             "질문을 입력하세요:",
-            key="user_input",
             placeholder="예: 강아지 피부 질환의 증상은 무엇인가요?",
-            label_visibility="collapsed"
+            label_visibility="collapsed",
         )
     
     with col2:
-        submit_button = st.button(
-            "📤 제출",
-            use_container_width=True,
-            on_click=handle_question_submission
-        )
-    
-    # 카카오맵 표시 버튼
-    st.divider()
-    if st.button("🗺️ 동물병원 위치 지도 보기", use_container_width=True):
-        st.session_state.show_hospital_map = not st.session_state.show_hospital_map
-    
-    # 카카오맵 표시
-    if st.session_state.show_hospital_map:
-        display_hospital_map()
-    
-    # 디버그 정보 표시 (마지막 메시지)
-    if st.session_state.show_debug_info and st.session_state.chat_history:
-        last_message = st.session_state.chat_history[-1]
-        if last_message['role'] == 'assistant':
-            display_debug_info(last_message)
-    
-    # 통계 표시 (세션 상태에 플래그가 있을 때)
-    if st.session_state.get('show_stats', False):
-        st.divider()
-        st.subheader("📊 대화 통계")
-        display_statistics()
-        st.session_state.show_stats = False
+        if st.button("📤 제출", use_container_width=True):
+            if question.strip():
+                process_question(question)
+            else:
+                st.warning("질문을 입력해주세요")
 
 
+# ============ 애플리케이션 실행 ============
 if __name__ == "__main__":
     main()
-
