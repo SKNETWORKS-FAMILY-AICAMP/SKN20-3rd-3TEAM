@@ -136,24 +136,8 @@ if not st.session_state.location_checked:
         
         try:
             # 병원 추천 Tool 호출
-            from src.utils.tools import search_nearby_hospitals
-            hospital_list = search_nearby_hospitals(lat=lat, lon=lon)
-            
-            if hospital_list and hospital_list[0].get("error"):
-                hospital_result_text = f"❌ 병원 검색 오류: {hospital_list[0]['error']}"
-            elif not hospital_list:
-                hospital_result_text = "주변 5km 이내에 동물병원을 찾을 수 없습니다."
-            else:
-                formatted_output = ["📍 사용자 위치 기준 가장 가까운 동물병원 정보입니다:\n"]
-                for i, hosp in enumerate(hospital_list, 1):
-                    distance_km = float(hosp['distance_m']) / 1000.0
-                    formatted_output.append(
-                        f"{i}. **{hosp['name']}**\n"
-                        f"   - 거리: 약 {distance_km:.2f} km\n"
-                        f"   - 주소: {hosp['address']}\n"
-                        f"   - 전화번호: {hosp['phone']}\n"
-                    )
-                hospital_result_text = "\n".join(formatted_output)
+            from src.utils.tools import hospital_recommend_tool
+            hospital_result_text = hospital_recommend_tool.invoke(lat=lat, lon=lon)
             
             # 환영 메시지 및 병원 추천 결과 출력
             welcome_message = f"""안녕하세요! 🐾 **반려동물 건강 상담 챗봇**입니다.
@@ -356,12 +340,12 @@ if user_input := st.chat_input("증상을 입력하거나 위치 정보를 알�
                 department = st.session_state.last_department
                 
                 try:
-                    from src.utils.tools import search_nearby_hospitals
+                    from src.utils.tools import hospital_recommend_tool
                     
                     # GPS 좌표가 있으면 GPS 우선 사용, 없으면 텍스트 주소 사용
                     if st.session_state.user_gps_location:
                         gps = st.session_state.user_gps_location
-                        hospital_list = search_nearby_hospitals(
+                        hospital_result = hospital_recommend_tool.invoke(
                             lat=gps["lat"], 
                             lon=gps["lon"]
                         )
@@ -369,25 +353,8 @@ if user_input := st.chat_input("증상을 입력하거나 위치 정보를 알�
                     else:
                         # 텍스트 주소 사용
                         location = user_input
-                        hospital_list = search_nearby_hospitals(query=location)
+                        hospital_result = hospital_recommend_tool.invoke(query=location)
                         location_display = location
-                    
-                    # 검색 결과 포맷팅
-                    if hospital_list and hospital_list[0].get("error"):
-                        hospital_result = f"❌ 병원 검색 오류: {hospital_list[0]['error']}"
-                    elif not hospital_list:
-                        hospital_result = "주변 5km 이내에 동물병원을 찾을 수 없습니다."
-                    else:
-                        formatted_output = ["📍 사용자 위치 기준 가장 가까운 동물병원 정보입니다:\n"]
-                        for i, hosp in enumerate(hospital_list, 1):
-                            distance_km = float(hosp['distance_m']) / 1000.0
-                            formatted_output.append(
-                                f"{i}. **{hosp['name']}**\n"
-                                f"   - 거리: 약 {distance_km:.2f} km\n"
-                                f"   - 주소: {hosp['address']}\n"
-                                f"   - 전화번호: {hosp['phone']}\n"
-                            )
-                        hospital_result = "\n".join(formatted_output)
                     
                     response_text = f"""
 📍 **위치 기반 병원 추천 결과**
@@ -431,29 +398,40 @@ if user_input := st.chat_input("증상을 입력하거나 위치 정보를 알�
                 st.error("⚠️ RAG 시스템이 비활성화되어 있습니다.")
                 response_text = "죄송합니다. 현재 시스템 점검 중입니다."
             else:
-                # RAG Agent 실행
-                with st.spinner("🔍 전문가 분석 중... (증상 분석 → 응급도 판단 → 검수)"):
-                    try:
-                        # LangGraph Agent 실행 (user_location 파라미터 추가)
-                        result = run_agent(
-                            user_query=user_input,
-                            user_location=None,  # 첫 실행에서는 위치 없음, 나중에 요청
-                            config={"configurable": {"thread_id": f"streamlit_{len(st.session_state.messages)}"}}
-                        )
-                        
-                        response_text = result.get("final_response", "응답 생성에 실패했습니다.")
-                        urgency_level = result.get("urgency_level", "N/A")
-                        recommended_department = result.get("recommended_department", "N/A")
-                        
+                # RAG Agent 실행 (진행 상황 표시)
+                progress_container = st.empty()  # 진행 상황 표시용 컨테이너
+                
+                try:
+                    # LangGraph Agent 실행 (streamlit_container 전달)
+                    result = run_agent(
+                        user_query=user_input,
+                        user_location=None,  # 첫 실행에서는 위치 없음, 나중에 요청
+                        config={"configurable": {"thread_id": f"streamlit_{len(st.session_state.messages)}"}},
+                        streamlit_container=progress_container  # 진행 상황 표시용 컨테이너 전달
+                    )
+                    
+                    # 진행 상황 표시 제거
+                    progress_container.empty()
+                    
+                    response_text = result.get("final_response", "응답 생성에 실패했습니다.")
+                    urgency_level = result.get("urgency_level", "N/A")
+                    recommended_department = result.get("recommended_department", "N/A")
+                    
+                    # 무효 질문인 경우 별도 처리
+                    if urgency_level == "INVALID":
+                        st.warning("⚠️ 유효하지 않은 질문입니다.")
+                        metadata = {}
+                    else:
                         # 메타데이터 저장
                         metadata = {
                             "urgency_level": urgency_level,
                             "recommended_department": recommended_department
                         }
-                        
-                    except Exception as e:
-                        response_text = f"⚠️ 오류가 발생했습니다: {str(e)}"
-                        metadata = {}
+                    
+                except Exception as e:
+                    progress_container.empty()
+                    response_text = f"⚠️ 오류가 발생했습니다: {str(e)}"
+                    metadata = {}
             
             # 응답 출력
             st.markdown(response_text)

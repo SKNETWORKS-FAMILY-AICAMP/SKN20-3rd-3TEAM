@@ -49,60 +49,60 @@ class AgentState(TypedDict):
     revision_count: int  # 재검토 횟수 (무한 루프 방지)
 
 
+# 전역 변수로 Streamlit container 저장 (직렬화 방지)
+_streamlit_container = None
+
+
 # ============================================================================
 # Node 함수 정의
 # ============================================================================
 
 def validate_question_node(state: AgentState) -> AgentState:
     """
-    Node 0: 질문 유효성 검사
+    Node 0: 질문 유효성 검사 (키워드 기반)
     
-    사용자 질문이 반려동물 건강 관련인지 먼저 확인합니다.
-    범위 외 질문은 즉시 거절하고 워크플로우를 종료합니다.
+    사용자 질문이 반려동물 건강 관련인지 키워드로 빠르게 확인합니다.
     """
     print("\n[Node 0] 질문 유효성 검사 중...")
     
-    user_query = state["user_query"]
+    # Streamlit 진행 상황 표시
+    global _streamlit_container
+    if _streamlit_container:
+        _streamlit_container.info("🔍 질문 유효성 검사 중...")
     
-    # LLM을 사용한 질문 유효성 검사
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0.0,
-        max_tokens=300
-    )
+    user_query = state["user_query"].lower()
     
-    validation_prompt = f"""당신은 반려동물 건강 상담 전문가입니다. 다음 질문이 반려동물 건강과 관련된 유효한 질문인지 판단하세요.
-
-## 사용자 질문
-{user_query}
-
-## 판단 기준
-
-### 유효한 질문 (답변 가능)
-- 반려동물의 증상, 질병, 건강 문제에 관한 질문
-- 응급 상황 판단 요청
-- 병원 위치 및 추천 요청
-- 반려동물 건강 관리 조언 요청
-
-### 무효한 질문 (답변 불가)
-- 반려동물과 전혀 무관한 질문 (예: "배고파", "날씨 어때?", "심심해")
-- 사람의 건강 문제
-- 일반적인 잡담이나 인사
-- 반려동물 훈련/행동 교정 (질병 증상이 아닌 경우)
-
-## 출력 형식 (반드시 아래 형식만 사용)
-
-**판정**: [유효/무효]
-**근거**: [1문장으로 간단히 설명]"""
+    # 반려동물 관련 키워드
+    pet_keywords = ['강아지', '고양이', '개', '고양', '멍멍', '야옹', '반려견', '반려묘', '펫', '애완', '반려동물']
     
-    response = llm.invoke([HumanMessage(content=validation_prompt)])
-    validation_result = response.content
+    # 건강/증상 관련 키워드
+    health_keywords = [
+        '아프', '아파', '증상', '병', '질병', '구토', '설사', '기침', '열', '피부', '눈', '귀',
+        '발진', '가려', '탈모', '식욕', '밥', '물', '호흡', '숨', '경련', '발작', '절뚝',
+        '출혈', '피', '상처', '부상', '골절', '토', '변', '소변', '대변', '황달', '충혈',
+        '수의사', '동물병원', '진료', '치료', '응급', '위급', '검사', '진단'
+    ]
     
-    # 유효성 파싱
-    is_valid = "유효" in validation_result and "무효" not in validation_result.split("판정")[1].split("\n")[0]
+    # 무효 키워드 (명확한 범위 외)
+    invalid_keywords = [
+        'print', 'hello', 'world', '코드', '프로그램', '함수', '변수',
+        '배고파', '날씨', '심심', '놀아', '게임', '노래', '요리', '맛집', '여행',
+        'python', 'java', 'javascript', 'def', 'class', 'import'
+    ]
+    
+    # 무효 키워드 체크 (최우선)
+    if any(keyword in user_query for keyword in invalid_keywords):
+        is_valid = False
+    # 반려동물 키워드 필수 체크
+    elif any(keyword in user_query for keyword in pet_keywords):
+        # 반려동물 키워드가 있으면 유효
+        is_valid = True
+    else:
+        # 나머지는 무효
+        is_valid = False
     
     if not is_valid:
-        # 무효한 질문 → 거절 응답 생성 후 즉시 종료
+        # 무효한 질문 -> 거절 응답 생성 후 즉시 종료
         rejection_message = """죄송합니다. 저는 반려동물의 건강 증상 분석 및 응급도 판단만을 전문으로 하는 AI 상담 시스템입니다.
 
 반려동물과 관련이 없는 질문이나, 반려동물 건강 증상이 아닌 질문에는 답변을 드릴 수 없습니다.
@@ -116,18 +116,23 @@ def validate_question_node(state: AgentState) -> AgentState:
         
         state["final_response"] = rejection_message
         state["next_action"] = "end"
-        state["messages"].append(AIMessage(content=f"[질문 유효성 검사]\n{validation_result}\n\n{rejection_message}"))
+        state["urgency_level"] = "INVALID"
+        state["messages"].append(AIMessage(content=rejection_message))
         
-        print(f"[Node 0 완료] 무효한 질문 감지 → 워크플로우 종료")
+        if _streamlit_container:
+            _streamlit_container.warning("⚠️ 유효하지 않은 질문입니다.")
+        
+        print(f"[Node 0 완료] 무효한 질문 감지 -> 워크플로우 종료")
         return state
     
-    # 유효한 질문 → 다음 노드로 진행
+    # 유효한 질문 -> 다음 노드로 진행
     state["next_action"] = "analyze_symptom"
-    state["messages"].append(AIMessage(content=f"[질문 유효성 검사] 유효한 질문 확인"))
     
-    print(f"[Node 0 완료] 유효한 질문 확인 → 증상 분석 진행")
+    if _streamlit_container:
+        _streamlit_container.success("✅ 유효한 질문입니다.")
+    
+    print(f"[Node 0 완료] 유효한 질문 확인 -> 증상 분석 진행")
     return state
-
 
 def analyze_symptom_node(state: AgentState) -> AgentState:
     """
@@ -136,6 +141,11 @@ def analyze_symptom_node(state: AgentState) -> AgentState:
     사용자의 질문을 분석하고 RAG를 통해 관련 정보를 검색합니다.
     """
     print("\n[Node 1] 증상 분석 시작...")
+    
+    # Streamlit 진행 상황 표시
+    global _streamlit_container
+    if _streamlit_container:
+        _streamlit_container.info("📋 증상 분석 중... (RAG 검색)")
     
     user_query = state["user_query"]
     
@@ -236,6 +246,14 @@ def triage_and_decide_node(state: AgentState) -> AgentState:
     revision_count = state.get("revision_count", 0)
     
     print(f"\n[Node 2] 응급도 판단 중... (재검토 {revision_count}회차)")
+    
+    # Streamlit 진행 상황 표시
+    global _streamlit_container
+    if _streamlit_container:
+        if revision_count > 0:
+            _streamlit_container.info(f"🔄 응급도 재판단 중... ({revision_count}회차)")
+        else:
+            _streamlit_container.info("🚨 응급도 판단 중...")
     
     symptoms_analysis = state["symptoms_analysis"]
     user_query = state["user_query"]
@@ -338,6 +356,11 @@ def medical_review_node(state: AgentState) -> AgentState:
     피드백 루프를 통해 오판을 최소화합니다.
     """
     print("\n[Node 3] 의학적 검수 시작...")
+    
+    # Streamlit 진행 상황 표시
+    global _streamlit_container
+    if _streamlit_container:
+        _streamlit_container.info("🔬 의학적 검수 중...")
     
     user_query = state["user_query"]
     symptoms_analysis = state["symptoms_analysis"]
@@ -446,6 +469,11 @@ def recommend_hospital_node(state: AgentState) -> AgentState:
     """
     print("\n[Node 4] 병원 추천 중...")
     
+    # Streamlit 진행 상황 표시
+    global _streamlit_container
+    if _streamlit_container:
+        _streamlit_container.info("🏥 주변 병원 검색 중...")
+    
     urgency = state["urgency_level"]
     department = state["recommended_department"]
     
@@ -478,50 +506,39 @@ def generate_final_response_node(state: AgentState) -> AgentState:
     """
     print("\n[Node 5] 최종 응답 생성 중...")
     
+    # Streamlit 진행 상황 표시
+    global _streamlit_container
+    if _streamlit_container:
+        _streamlit_container.info("✍️ 최종 응답 생성 중...")
+    
     llm = ChatOpenAI(
         model="gpt-4o-mini",
         temperature=0.3,
         max_tokens=1500
     )
     
-    # 병원 정보 처리
-    hospital_section = ""
-    hospital_list = state.get('hospital_list', '')
-    
-    if hospital_list and hospital_list.strip() and '병원을 찾을 수 없습니다' not in hospital_list:
-        # 병원 정보가 있는 경우
-        hospital_section = f"\n## 추천 병원\n{hospital_list}"
-    elif state['urgency_level'] in ['높음', '보통']:
-        # 병원 추천이 필요하지만 위치 정보가 없는 경우
-        hospital_section = "\n## 병원 위치 정보 필요\n병원을 추천해드리려면 위치 정보가 필요합니다. **화면 상단의 [📍 GPS 위치 공유] 버튼을 눌러주시거나**, '서울시 강남구 역삼동'처럼 **구체적인 주소**를 알려주세요."
-    
     # 최종 응답 생성 프롬프트
-    final_prompt = f"""당신은 수의학 전문가입니다. 다음 정보를 바탕으로 사용자에게 친절하고 전문적인 최종 답변을 작성하세요.
+    final_prompt = f"""다음 정보를 바탕으로 사용자에게 친절하고 전문적인 최종 답변을 작성하세요.
 
-## ⚠️ 중요 지침
-1. **사용자가 실제로 언급한 증상만** 다루세요. 증상 분석 자료에 다른 정보가 있어도 **사용자 질문에 없는 증상은 절대 언급하지 마세요**.
-2. 추측하거나 넘겨짚지 마세요. 사용자가 말하지 않은 증상은 답변에 포함하지 마세요.
-3. 전문 용어는 쉽게 풀어서 설명하세요.
-4. 병원 정보가 없으면 플레이스홀더(예: [병원 이름])를 만들지 말고, 위치 공유를 요청하세요.
-
-## 사용자 질문
+사용자 질문:
 {state['user_query']}
 
-## 증상 분석 자료 (참고용)
+증상 분석:
 {state['symptoms_analysis']}
 
-## 판단 결과
-- 응급도: {state['urgency_level']}
-- 추천 진료과: {state['recommended_department']}{hospital_section}
+응급도: {state['urgency_level']}
+추천 진료과: {state['recommended_department']}
 
-## 답변 구조
-1. **증상 확인**: 사용자가 언급한 증상만 간단히 요약
-2. **의심 질환**: 해당 증상과 관련된 가능성 있는 질환 (컨텍스트 기반)
-3. **응급도**: {state['urgency_level']} - 근거와 권장 조치
-4. **병원 추천**: 위 병원 섹션 내용 그대로 사용
-5. **주의사항**: 추가로 관찰할 사항
+추천 병원:
+{state.get('hospital_list', '병원 정보 없음')}
 
-**중요**: 사용자가 언급하지 않은 증상(예: 황달, 호흡곤란)은 절대 답변에 포함하지 마세요.
+답변 구조:
+1. 증상 요약 및 공감
+2. 의심 질환 설명 (전문 용어는 쉽게 풀어서)
+3. 응급도 및 권장 조치
+4. 추천 병원 정보 (있는 경우)
+5. 추가 주의사항
+
 따뜻하고 전문적인 톤으로 작성하세요."""
     
     response = llm.invoke([HumanMessage(content=final_prompt)])
@@ -540,23 +557,6 @@ def generate_final_response_node(state: AgentState) -> AgentState:
 # ============================================================================
 # Conditional Edge 함수
 # ============================================================================
-
-def after_validation_route(state: AgentState) -> Literal["analyze_symptom", "end"]:
-    """
-    조건부 엣지: 질문 유효성 검사 후 라우팅
-    
-    - next_action="analyze_symptom": 유효한 질문 → 증상 분석 진행
-    - next_action="end": 무효한 질문 → 즉시 종료
-    """
-    next_action = state.get("next_action", "end")
-    
-    if next_action == "analyze_symptom":
-        print("[조건부 엣지 - 유효성] 유효한 질문 → 증상 분석 노드로 진행")
-        return "analyze_symptom"
-    else:
-        print("[조건부 엣지 - 유효성] 무효한 질문 → 워크플로우 종료")
-        return "end"
-
 
 def needs_medical_revision(state: AgentState) -> Literal["triage_and_decide", "recommend_hospital", "generate_final_response"]:
     """
@@ -635,7 +635,7 @@ def create_pet_health_agent() -> StateGraph:
     # 질문 유효성 검사 → 조건부 분기 (유효: 증상 분석 / 무효: 종료)
     workflow.add_conditional_edges(
         "validate_question",
-        after_validation_route,
+        lambda state: "analyze_symptom" if state.get("next_action") == "analyze_symptom" else "end",
         {
             "analyze_symptom": "analyze_symptom",
             "end": END
@@ -678,7 +678,7 @@ def create_pet_health_agent() -> StateGraph:
 # 실행 함수
 # ============================================================================
 
-def run_agent(user_query: str, user_location: str = None, config: Dict[str, Any] = None) -> Dict[str, Any]:
+def run_agent(user_query: str, user_location: str = None, config: Dict[str, Any] = None, streamlit_container=None) -> Dict[str, Any]:
     """
     Agent 실행
     
@@ -686,10 +686,15 @@ def run_agent(user_query: str, user_location: str = None, config: Dict[str, Any]
         user_query: 사용자 질문
         user_location: 사용자 위치 (예: "서울시 강남구 역삼동")
         config: LangGraph 설정 (thread_id 등)
+        streamlit_container: Streamlit container 객체 (진행 상황 표시용)
         
     Returns:
         최종 상태
     """
+    # 전역 변수에 Streamlit container 저장 (직렬화 방지)
+    global _streamlit_container
+    _streamlit_container = streamlit_container
+    
     # Agent 생성
     app = create_pet_health_agent()
     
