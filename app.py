@@ -319,44 +319,40 @@ for message in st.session_state.messages:
 
 if user_input := st.chat_input("증상을 입력하거나 위치 정보를 알려주세요..."):
     
-    # 사용자 메시지 추가
+    # 사용자 메시지 추가 및 표시
     st.session_state.messages.append({
         "role": "user",
         "content": user_input
     })
     
-    with st.chat_message("user"):
-        st.markdown(user_input)
+    # ========================================================================
+    # Agent 실행 (전체 화면 재렌더링으로 자연스럽게 표시)
+    # ========================================================================
     
-    # ========================================================================
-    # Agent 실행
-    # ========================================================================
-    with st.chat_message("assistant"):
-        
-        # 병원 추천 대기 모드 처리
-        if st.session_state.waiting_for_location:
-            with st.spinner("🗺️ 주변 병원 검색 중..."):
-                urgency = st.session_state.last_urgency
-                department = st.session_state.last_department
+    # 병원 추천 대기 모드 처리
+    if st.session_state.waiting_for_location:
+        with st.chat_message("assistant"):
+            urgency = st.session_state.last_urgency
+            department = st.session_state.last_department
+            
+            try:
+                from src.utils.tools import hospital_recommend_tool
                 
-                try:
-                    from src.utils.tools import hospital_recommend_tool
-                    
-                    # GPS 좌표가 있으면 GPS 우선 사용, 없으면 텍스트 주소 사용
-                    if st.session_state.user_gps_location:
-                        gps = st.session_state.user_gps_location
-                        hospital_result = hospital_recommend_tool.invoke(
-                            lat=gps["lat"], 
-                            lon=gps["lon"]
-                        )
-                        location_display = f"GPS ({gps['lat']:.4f}, {gps['lon']:.4f})"
-                    else:
-                        # 텍스트 주소 사용
-                        location = user_input
-                        hospital_result = hospital_recommend_tool.invoke(query=location)
-                        location_display = location
-                    
-                    response_text = f"""
+                # GPS 좌표가 있으면 GPS 우선 사용, 없으면 텍스트 주소 사용
+                if st.session_state.user_gps_location:
+                    gps = st.session_state.user_gps_location
+                    hospital_result = hospital_recommend_tool.invoke(
+                        lat=gps["lat"], 
+                        lon=gps["lon"]
+                    )
+                    location_display = f"GPS ({gps['lat']:.4f}, {gps['lon']:.4f})"
+                else:
+                    # 텍스트 주소 사용
+                    location = user_input
+                    hospital_result = hospital_recommend_tool.invoke(query=location)
+                    location_display = location
+                
+                response_text = f"""
 📍 **위치 기반 병원 추천 결과**
 
 입력하신 위치: **{location_display}**
@@ -367,8 +363,8 @@ if user_input := st.chat_input("증상을 입력하거나 위치 정보를 알�
 
 💡 **권장 사항**: 응급도가 {urgency}이므로 즉시 병원 방문을 권장드립니다.
 """
-                except Exception as e:
-                    response_text = f"""
+            except Exception as e:
+                response_text = f"""
 ### ⚠️ 병원 검색 오류
 
 오류 메시지: {str(e)}
@@ -377,22 +373,26 @@ if user_input := st.chat_input("증상을 입력하거나 위치 정보를 알�
 1. GPS 위치 공유를 시도하거나, 더 구체적인 주소를 입력해주세요 (예: "서울시 강남구 역삼동")
 2. KAKAO_REST_API_KEY 환경 변수를 확인해주세요.
 """
-                
-                st.markdown(response_text)
-                
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": response_text
-                })
-                
-                # 병원 추천 모드 해제
-                st.session_state.waiting_for_location = False
-                st.session_state.last_urgency = None
-                st.session_state.last_department = None
-                st.session_state.user_gps_location = None  # GPS 좌표 초기화
-        
-        # 일반 RAG Agent 실행
-        else:
+            
+            st.markdown(response_text)
+            
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response_text
+            })
+            
+            # 병원 추천 모드 해제
+            st.session_state.waiting_for_location = False
+            st.session_state.last_urgency = None
+            st.session_state.last_department = None
+            st.session_state.user_gps_location = None  # GPS 좌표 초기화
+            
+        # 페이지 재렌더링
+        st.rerun()
+    
+    # 일반 RAG Agent 실행
+    else:
+        with st.chat_message("assistant"):
             if not RAG_AVAILABLE or rag_components["status"] != "success":
                 # RAG 비활성화 시 더미 응답
                 st.error("⚠️ RAG 시스템이 비활성화되어 있습니다.")
@@ -463,27 +463,67 @@ if user_input := st.chat_input("증상을 입력하거나 위치 정보를 알�
             st.session_state.messages.append(message_data)
             
             # ================================================================
-            # 6. 🚨 병원 추천 트리거 감지
+            # 6. 🚨 병원 추천 자동 실행 (응급도 높음/보통인 경우)
             # ================================================================
-            if "병원 추천이 필요합니다" in response_text or (
-                'metadata' in locals() and 
-                metadata.get("urgency_level") in ["높음", "보통"]
-            ):
-                st.warning("""
-                🚨 **병원 추천 기능 활성화**
+            if 'metadata' in locals() and metadata.get("urgency_level") in ["높음", "보통"]:
+                st.divider()
+                st.subheader("🏥 주변 동물병원 추천")
                 
-                응급도가 높거나 중간으로 판단되어 병원 방문이 권장됩니다.
-                현재 위치(구/동/시)를 입력해주시면 주변 동물병원을 추천해드립니다.
+                urgency = metadata.get("urgency_level")
+                department = metadata.get("recommended_department")
                 
-                예시: "서울시 강남구", "부산 해운대구"
-                """)
-                
-                # 병원 추천 대기 모드 활성화
-                st.session_state.waiting_for_location = True
-                
-                if 'metadata' in locals():
-                    st.session_state.last_urgency = metadata.get("urgency_level")
-                    st.session_state.last_department = metadata.get("recommended_department")
+                # GPS 좌표가 있으면 GPS 우선 사용
+                if st.session_state.user_gps_location:
+                    with st.spinner("🗺️ GPS 기반 병원 검색 중..."):
+                        try:
+                            from src.utils.tools import hospital_recommend_tool
+                            gps = st.session_state.user_gps_location
+                            hospital_result = hospital_recommend_tool.invoke(
+                                lat=gps["lat"], 
+                                lon=gps["lon"]
+                            )
+                            
+                            hospital_response = f"""
+📍 **GPS 기반 병원 추천**
+
+위치: GPS ({gps['lat']:.4f}, {gps['lon']:.4f})
+추천 진료과: **{department}**
+응급도: **{urgency}**
+
+{hospital_result}
+
+💡 **권장 사항**: 응급도가 {urgency}이므로 즉시 병원 방문을 권장드립니다.
+"""
+                            st.markdown(hospital_response)
+                            
+                            # 병원 추천 결과도 메시지에 추가
+                            st.session_state.messages.append({
+                                "role": "assistant",
+                                "content": hospital_response
+                            })
+                            
+                        except Exception as e:
+                            st.error(f"⚠️ 병원 검색 중 오류: {str(e)}")
+                else:
+                    # GPS가 없으면 수동 입력 요청
+                    st.info("""
+                    📍 **위치 정보 필요**
+                    
+                    병원을 추천해드리기 위해 위치 정보가 필요합니다.
+                    
+                    1. 위 'GPS 위치 공유' 버튼을 클릭하거나
+                    2. 아래 채팅창에 주소를 입력해주세요.
+                    
+                    예시: "서울시 강남구", "부산 해운대구"
+                    """)
+                    
+                    # 병원 추천 대기 모드 활성화
+                    st.session_state.waiting_for_location = True
+                    st.session_state.last_urgency = urgency
+                    st.session_state.last_department = department
+            
+            # 페이지 재렌더링
+            st.rerun()
 
 
 # ============================================================================
