@@ -142,7 +142,7 @@ if __name__ == "__main__":
     # 테스트
     from ingestion import ingest_data
     
-    data_dir = "../data/Validation/01.원천데이터"
+    data_dir = "../data/raw/disease"
     docs = ingest_data(data_dir)
     
     print(f"Original documents: {len(docs)}")
