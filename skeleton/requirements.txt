@@ -1,0 +1,97 @@
+# RAG 어시스턴트 스켈레톤 코드 - 의존성 패키지
+# 
+# 기본 설치:
+#   pip install -r requirements.txt
+#
+# 구현 단계별 추가 패키지:
+#   Phase 1 (검색): vectordb, embeddings
+#   Phase 2 (LLM): openai, langchain
+#   Phase 3 (통합): langgraph
+#
+
+# ==================== 핵심 패키지 ====================
+# Python 버전: 3.9+
+
+# 타입 힌팅 및 검증
+pydantic>=2.0.0
+typing-extensions>=4.0.0
+
+# ==================== LLM 및 LangChain ====================
+# (Phase 2에서 필요)
+
+# OpenAI API 통합
+openai>=1.0.0
+
+# LangChain 프레임워크
+langchain>=0.1.0
+langchain-core>=0.1.0
+langchain-openai>=0.1.0
+langchain-community>=0.1.0
+
+# LangGraph (상태 그래프)
+langgraph>=0.0.1
+
+# ==================== 벡터 DB 및 검색 ====================
+# (Phase 1에서 필요)
+
+# Chroma 벡터 DB
+chromadb>=0.4.0
+
+# 임베딩 모델
+sentence-transformers>=2.2.0
+
+# ==================== 웹 검색 ====================
+# (Phase 1에서 필요)
+
+# Tavily 웹 검색 API
+tavily-python>=0.2.0
+
+# 웹 스크래핑 (선택사항)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# ==================== 지도 API ====================
+# (Phase 1에서 필요)
+
+# 카카오맵 API (공식 패키지 없음, 직접 HTTP 호출)
+# requests 라이브러리 사용
+
+# ==================== 유틸리티 ====================
+
+# 환경변수 관리
+python-dotenv>=1.0.0
+
+# 로깅 (고급 기능)
+loguru>=0.7.0
+
+# 시간 처리
+python-dateutil>=2.8.0
+
+# ==================== 개발 및 테스트 ====================
+# (선택사항)
+
+# 단위 테스트
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# 코드 품질
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+
+# 성능 프로파일링
+py-spy>=0.3.14
+
+# ==================== 노트북 (Jupyter) ====================
+# (선택사항, 대화형 테스트용)
+
+jupyter>=1.0.0
+ipython>=8.0.0
+ipywidgets>=8.0.0
+
+# ==================== 문서화 ====================
+# (선택사항)
+
+sphinx>=5.0.0
+sphinx-rtd-theme>=1.2.0
+
