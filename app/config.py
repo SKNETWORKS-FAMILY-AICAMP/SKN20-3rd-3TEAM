@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"  # 추가된 필드 무시
 
 
 # 전역 설정 인스턴스 (이 부분이 중요!)
