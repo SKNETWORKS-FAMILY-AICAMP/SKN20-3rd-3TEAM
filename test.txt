@@ -1,0 +1,29 @@
+skeleton/
+├── :file_folder: data_processing/         (데이터 처리)
+│   ├── __init__.py
+│   ├── data_processor.py
+│   └── vector_store_manager.py
+│
+├── :file_folder: classification/          (입력 분류)
+│   ├── __init__.py
+│   └── input_classifier.py
+│
+├── :file_folder: retrieval/               (검색)
+│   ├── __init__.py
+│   ├── rag_handler.py
+│   └── map_handler.py
+│
+├── :file_folder: generation/              (응답 생성)
+│   ├── __init__.py
+│   └── llm_generator.py
+│
+├── :file_folder: evaluation/              (평가)
+│   ├── __init__.py
+│   └── evaluation_controller.py
+│
+├── :file_folder: orchestration/           (오케스트레이션)
+│   ├── __init__.py
+│   └── main_workflow.py
+│
+└── :page_facing_up: MODULAR_STRUCTURE.md     (상세 가이드)
+    :page_facing_up: MODULAR_SUMMARY.md       (요약)
