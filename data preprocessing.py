@@ -1,6 +1,8 @@
 
+
 '''
-의학 데이터 전처리 & 임베딩 & 벡터스토어 코드
+의학지식(원천데이터) + 질의응답 데이터 전처리 및 청킹 코드
+코드 실행시 chunked_docs.pkl 파일 생성됩니다.
 '''
 
 
@@ -188,13 +190,13 @@ for doc in docs:
     # 데이터 타입에 맞는 splitter 선택
     if source_type == "medical data":
         splitter = splitter_map["medical_data"]
-        print(f"의학 데이터 청킹")
+        # print(f"의학 데이터 청킹")
     elif source_type == "qa_data":
         splitter = splitter_map["qa_data"]  
-        print(f"QA 데이터 청킹")
+        # print(f"QA 데이터 청킹")
     else:
         splitter = default_splitter
-        print(f"기본 청킹")
+        # print(f"기본 청킹")
     
     # 청킹 실행
     chunks = splitter.split_documents([doc])
