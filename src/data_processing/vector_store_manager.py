@@ -9,8 +9,23 @@ Vector Store Manager Module
   - DB 생명주기 관리 (생성, 업데이트, 삭제)
 """
 
+import os
+import time
 from typing import List, Dict, Tuple, Optional
 import hashlib
+import warnings
+warnings.filterwarnings("ignore")
+
+from dotenv import load_dotenv
+from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
+from langchain_core.documents import Document
+
+load_dotenv()
+
+# API 키 확인
+if not os.environ.get('OPENAI_API_KEY'):
+    raise ValueError('.env 확인하세요. OPENAI_API_KEY가 없습니다')
 
 
 class VectorStoreManager:
@@ -24,116 +39,142 @@ class VectorStoreManager:
         4. 유사도 검색
     """
     
-    def __init__(self, model_name: str = "sentence-transformers/multilingual-e5-base"):
+    def __init__(
+        self, 
+        collection_name: str = "pet_health_qa_system",
+        persist_directory: str = "./chroma_db",
+        embedding_model: str = "text-embedding-3-small"
+    ):
         """
         VectorStoreManager 초기화
         
         Args:
-            model_name (str): 사용할 임베딩 모델 (기본값: multilingual-e5-base)
-        
-        속성:
-            - embedding_model: 임베딩 모델 (로드되지 않은 상태)
-            - vector_db: 벡터 DB 클라이언트 (Chroma)
-            - collection_name: DB 컬렉션 이름
-            - embedding_dim: 임베딩 차원 수 (보통 768)
-        
-        TODO:
-            - embedding_model = SentenceTransformer(model_name) 로드
-            - vector_db = chromadb.Client() 초기화
-            - 기존 컬렉션 로드 또는 새로 생성
+            collection_name: Chroma 컬렉션 이름
+            persist_directory: 벡터 DB 저장 경로
+            embedding_model: OpenAI 임베딩 모델명
         """
-        self.model_name = model_name
-        self.embedding_model = None  # TODO: 모델 로드
-        self.vector_db = None  # TODO: Chroma 클라이언트 초기화
-        self.collection_name = "medical_documents"
-        self.embedding_dim = 768
+        self.collection_name = collection_name
+        self.persist_directory = persist_directory
+        self.embedding_function = OpenAIEmbeddings(model=embedding_model)
+        self.vector_db = None
         
-        print(f"✓ [VectorStoreManager] 초기화 완료: {model_name}")
+        print(f"✓ [VectorStoreManager] 초기화 완료: {collection_name}")
     
     
-    def embed_chunk(self, text: str) -> List[float]:
+    def create_vectorstore(self, documents: List[Document], batch_size: int = 100) -> bool:
         """
-        텍스트 청크를 임베딩 벡터로 변환
+        문서들로부터 벡터스토어 생성
         
         Args:
-            text (str): 변환할 텍스트 청크
+            documents: Document 객체 리스트
+            batch_size: 배치 처리 크기
             
         Returns:
-            List[float]: 임베딩 벡터 (길이: embedding_dim)
-        
-        처리:
-            1. 텍스트 정규화
-            2. 임베딩 모델 호출
-            3. 벡터 반환
-            
-        예시:
-            입력: "강아지 피부염 증상은 가려움증입니다"
-            출력: [0.123, 0.456, ..., -0.789]  (길이: 768)
-        
-        TODO:
-            - embedding_model.encode(text) 호출
-            - 벡터 정규화 (선택)
+            bool: 성공 여부
         """
-        # TODO: 실제 임베딩 생성
-        # embedding = self.embedding_model.encode(text)
-        
-        # 더미 벡터 생성 (768차원)
-        hash_value = int(hashlib.md5(text.encode()).hexdigest(), 16)
-        embedding = [(hash_value + i) % 1000 / 1000.0 for i in range(self.embedding_dim)]
-        
-        print(f"✓ [embed_chunk] {len(text)} 문자 텍스트 → {len(embedding)}차원 벡터")
-        return embedding
+        try:
+            print(f"\n벡터스토어 생성 시작: {len(documents)}개 문서")
+            
+            # 첫 번째 배치로 벡터스토어 생성
+            first_batch = documents[:batch_size]
+            
+            self.vector_db = Chroma.from_documents(
+                documents=first_batch,
+                embedding=self.embedding_function,
+                collection_name=self.collection_name,
+                persist_directory=self.persist_directory,
+            )
+            
+            print(f"첫 번째 배치 완료: {len(first_batch)}개 문서")
+            
+            # 나머지 문서들을 배치로 추가
+            remaining_docs = documents[batch_size:]
+            total_batches = len(remaining_docs) // batch_size + (1 if len(remaining_docs) % batch_size > 0 else 0)
+            
+            for i in range(0, len(remaining_docs), batch_size):
+                batch_num = i // batch_size + 2
+                batch = remaining_docs[i:i + batch_size]
+                
+                print(f"배치 {batch_num}/{total_batches + 1} 처리 중... ({len(batch)}개 문서)")
+                
+                try:
+                    self.vector_db.add_documents(batch)
+                    print(f"배치 {batch_num} 완료!")
+                    time.sleep(1)  # API 호출 제한 방지
+                    
+                except Exception as e:
+                    print(f"배치 {batch_num} 에러: {e}")
+                    # 더 작은 배치로 재시도
+                    smaller_batches = [batch[j:j+20] for j in range(0, len(batch), 20)]
+                    for small_batch in smaller_batches:
+                        try:
+                            self.vector_db.add_documents(small_batch)
+                            time.sleep(0.5)
+                        except Exception as small_e:
+                            print(f"소 배치 에러: {small_e}")
+            
+            print("벡터스토어 생성 완료!")
+            print(f"저장 경로: {self.persist_directory}")
+            print(f"컬렉션명: {self.collection_name}")
+            return True
+            
+        except Exception as e:
+            print(f"벡터스토어 생성 실패: {e}")
+            return False
     
     
-    def embed_and_index_chunks(self, chunks: List[str]) -> bool:
+    def load_vectorstore(self) -> bool:
+        """
+        기존 벡터스토어 로드
+        
+        Returns:
+            bool: 성공 여부
+        """
+        try:
+            self.vector_db = Chroma(
+                persist_directory=self.persist_directory,
+                collection_name=self.collection_name,
+                embedding_function=self.embedding_function
+            )
+            print(f"✓ 벡터스토어 로드 성공: {self.collection_name}")
+            return True
+        except Exception as e:
+            print(f"벡터스토어 로드 실패: {e}")
+            return False
+    
+    
+    def embed_and_index_chunks(self, chunks: List[Document]) -> bool:
         """
         여러 청크를 임베딩하고 벡터 DB에 인덱싱
         
         Args:
-            chunks (List[str]): 인덱싱할 텍스트 청크 리스트
+            chunks: Document 객체 리스트
             
         Returns:
-            bool: 성공 여부 (True: 성공, False: 실패)
-        
-        처리:
-            1️⃣  [임베딩 생성] 각 청크를 벡터로 변환
-            2️⃣  [ID 생성] 고유 ID 할당 (hash 기반)
-            3️⃣  [메타데이터] 청크 정보 저장
-            4️⃣  [DB 저장] 벡터와 메타데이터를 DB에 인덱싱
-            5️⃣  [검증] 저장 성공 여부 확인
-        
-        예시:
-            입력: ["청크1: 피부염...", "청크2: 치료 방법..."]
-            
-            처리:
-            - 청크1 → 임베딩1 (ID: hash_abc123)
-            - 청크2 → 임베딩2 (ID: hash_def456)
-            
-            출력: True (성공)
-        
-        TODO:
-            - 청크별 임베딩 생성 루프
-            - DB 저장 로직 (add_documents)
-            - 예외 처리 (API 오류, DB 연결 오류)
+            bool: 성공 여부
         """
-        # TODO: 배치 임베딩 생성
-        # embeddings = [self.embed_chunk(chunk) for chunk in chunks]
+        return self.create_vectorstore(chunks)
+    
+    
+    def get_retriever(self, search_type: str = "similarity", k: int = 5):
+        """
+        리트리버 객체 반환
         
-        # TODO: DB 저장
-        # self.vector_db.add_documents(
-        #     documents=chunks,
-        #     embeddings=embeddings,
-        #     metadatas=[{...} for chunk in chunks]
-        # )
+        Args:
+            search_type: 검색 타입 (similarity, mmr 등)
+            k: 검색할 문서 개수
+            
+        Returns:
+            Retriever 객체
+        """
+        if self.vector_db is None:
+            if not self.load_vectorstore():
+                raise ValueError("벡터스토어를 로드할 수 없습니다.")
         
-        print(f"\n🔄 [embed_and_index_chunks] {len(chunks)}개 청크 인덱싱 시작\n")
-        
-        for idx, chunk in enumerate(chunks, 1):
-            print(f"  [{idx}/{len(chunks)}] 임베딩 생성: {chunk[:50]}...")
-            embedding = self.embed_chunk(chunk)
-        
-        print(f"\n✅ 인덱싱 완료: {len(chunks)}개 청크 저장됨\n")
-        return True
+        return self.vector_db.as_retriever(
+            search_type=search_type,
+            search_kwargs={"k": k}
+        )
     
     
     def search_similar_chunks(
@@ -141,56 +182,31 @@ class VectorStoreManager:
         query: str,
         top_k: int = 5,
         threshold: float = 0.5
-    ) -> List[Tuple[str, float]]:
+    ) -> List[Document]:
         """
         쿼리와 유사한 청크 검색
         
         Args:
-            query (str): 검색 쿼리
-            top_k (int): 반환할 상위 K개 결과
-            threshold (float): 유사도 임계값 (0.0-1.0)
+            query: 검색 쿼리
+            top_k: 반환할 상위 K개 결과
+            threshold: 유사도 임계값 (사용 안 함)
         
         Returns:
-            List[Tuple[str, float]]: [(청크_텍스트, 유사도_점수), ...]
-                유사도 점수는 0.0 (완전히 다름) ~ 1.0 (동일)
-        
-        검색 과정:
-            1. 쿼리를 임베딩으로 변환
-            2. DB에서 유사도 검색 (cosine similarity)
-            3. threshold 이상 결과만 필터링
-            4. Top-K 결과 반환
-        
-        예시:
-            입력: query="강아지 피부염", top_k=3
-            
-            출력:
-            [
-                ("피부염은 가려움증을 유발합니다", 0.92),
-                ("강아지 질병 관리 방법", 0.78),
-                ("동물병원 진료 안내", 0.62)
-            ]
-        
-        TODO:
-            - 쿼리 임베딩 생성
-            - DB 유사도 검색
-            - 결과 필터링 및 정렬
+            List[Document]: 검색된 Document 리스트
         """
-        # TODO: 검색 로직
-        # query_embedding = self.embed_chunk(query)
-        # results = self.vector_db.search(query_embedding, top_k=top_k)
+        if self.vector_db is None:
+            if not self.load_vectorstore():
+                return []
         
-        print(f"🔍 [search_similar_chunks] 유사도 검색: '{query}' (top_k={top_k})\n")
+        print(f"🔍 [search_similar_chunks] 유사도 검색: '{query}' (top_k={top_k})")
         
-        # 더미 결과
-        dummy_results = [
-            (f"검색 결과 {i+1}: {query} 관련 청크 텍스트...", 0.9 - i*0.1)
-            for i in range(top_k)
-        ]
-        
-        for chunk, score in dummy_results:
-            print(f"  [{score:.2%}] {chunk[:50]}...")
-        
-        return dummy_results
+        try:
+            results = self.vector_db.similarity_search(query, k=top_k)
+            print(f"✓ {len(results)}개 문서 검색됨")
+            return results
+        except Exception as e:
+            print(f"검색 실패: {e}")
+            return []
     
     
     def delete_chunk_by_id(self, chunk_id: str) -> bool:

@@ -8,47 +8,88 @@ RAG(Retrieval-Augmented Generation) 및 웹 검색 처리
   - CRAG 패턴 구현 (검색 실패 시 웹 검색 폴백)
 """
 
-from typing import Tuple, Optional
+import sys
+import os
+from typing import Tuple, Optional, List
+
+# 상위 디렉토리를 경로에 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from data_processing.vector_store_manager import VectorStoreManager
+from langchain_core.documents import Document
 
 
-def perform_rag_search(query: str) -> str:
+# 전역 벡터스토어 매니저 인스턴스
+_vector_manager = None
+
+def get_vector_manager():
+    """벡터스토어 매니저 싱글톤 인스턴스 반환"""
+    global _vector_manager
+    if _vector_manager is None:
+        _vector_manager = VectorStoreManager()
+        _vector_manager.load_vectorstore()
+    return _vector_manager
+
+
+def format_docs(docs: List[Document]) -> str:
+    """
+    문서 포맷팅 함수
+    
+    Args:
+        docs: Document 리스트
+        
+    Returns:
+        str: 포맷된 문서 문자열
+    """
+    formatted_docs = []
+    for doc in docs:
+        metadata = doc.metadata
+        
+        # 데이터 유형에 따라 출처 정보 구성
+        if metadata.get("source_type") == "qa_data":
+            source_info = f"상담기록 - {metadata.get('lifeCycle', '')}/{metadata.get('department', '')}/{metadata.get('disease', '')}"
+        else:
+            # 수의학 서적의 경우
+            source_info = f"서적 - {metadata.get('title', '')}"
+            if metadata.get('author'):
+                source_info += f" (저자: {metadata['author']})"
+        
+        formatted_doc = f"""<document>
+<content>{doc.page_content}</content>
+<source_info>{source_info}</source_info>
+<data_type>{metadata.get('source_type', 'unknown')}</data_type>
+</document>"""
+        
+        formatted_docs.append(formatted_doc)
+    
+    return "\n\n".join(formatted_docs)
+
+
+def perform_rag_search(query: str, k: int = 5) -> str:
     """
     RAG 시스템을 통해 벡터 DB에서 관련 문서 검색
     
     Args:
-        query (str): 검색할 쿼리
+        query: 검색할 쿼리
+        k: 검색할 문서 개수
         
     Returns:
         str: 검색된 컨텍스트 문서 텍스트
-            빈 문자열이면 검색 실패 (웹 검색으로 폴백)
-        
-    처리 순서:
-        1️⃣  [쿼리 임베딩] 검색 쿼리를 벡터로 변환
-        2️⃣  [벡터 검색] 벡터 DB (Chroma)에서 유사 문서 검색 (Top-K=5)
-        3️⃣  [관련성 평가] LLM을 사용한 문서 관련성 평가 (Grading)
-        4️⃣  [필터링] 임계값 이상의 관련 문서만 선별
-        5️⃣  [문서 반환] 필터링된 문서 텍스트 병합하여 반환
-    
-    CRAG 패턴의 일부:
-        - 이 함수가 비어있거나 점수가 낮으면 웹 검색으로 전환
-        - perform_web_search()로 폴백
-    
-    TODO:
-        - VectorStoreManager의 search_similar_chunks() 호출
-        - 문서 관련성 평가 (LLM 또는 휴리스틱)
-        - 임계값 필터링
-        - 최종 컨텍스트 생성
     """
-    # TODO: RAG 파이프라인 호출
-    # 1. vector_manager = get_vector_manager()
-    # 2. results = vector_manager.search_similar_chunks(query, top_k=5)
-    # 3. 결과 필터링 및 평가
-    # 4. 최종 컨텍스트 생성
-    
-    # 더미 응답
-    context = f"[RAG 검색 결과]\n쿼리: {query}\n\n관련 문서 내용:\n- 강아지 질환 관련 정보\n- 증상 설명\n- 치료 방법"
-    print(f"✓ [perform_rag_search] '{query}' → RAG 검색 성공 ({len(context)} 문자)")
-    return context
+    try:
+        vector_manager = get_vector_manager()
+        docs = vector_manager.search_similar_chunks(query, top_k=k)
+        
+        if docs:
+            context = format_docs(docs)
+            print(f"✓ [perform_rag_search] '{query}' → RAG 검색 성공 ({len(docs)}개 문서)")
+            return context
+        else:
+            print(f"✗ [perform_rag_search] '{query}' → 관련 문서 없음")
+            return ""
+    except Exception as e:
+        print(f"✗ [perform_rag_search] 검색 실패: {e}")
+        return ""
 
 
 def perform_web_search(query: str) -> str:
@@ -88,59 +129,44 @@ def perform_web_search(query: str) -> str:
     return web_results
 
 
-def search_with_fallback(query: str) -> Tuple[str, str]:
+def get_retriever(search_type: str = "similarity", k: int = 5):
+    """
+    리트리버 객체 반환
+    
+    Args:
+        search_type: 검색 타입
+        k: 검색할 문서 개수
+        
+    Returns:
+        Retriever 객체
+    """
+    vector_manager = get_vector_manager()
+    return vector_manager.get_retriever(search_type=search_type, k=k)
+
+
+def search_with_fallback(query: str, k: int = 5) -> Tuple[str, str]:
     """
     RAG 검색 실패 시 웹 검색으로 자동 폴백하는 통합 검색 함수
     
     Args:
-        query (str): 검색할 쿼리
+        query: 검색할 쿼리
+        k: 검색할 문서 개수
         
     Returns:
         Tuple[str, str]: (검색_결과, 검색_소스)
-            - 검색_결과: 컨텍스트 텍스트
-            - 검색_소스: "rag" 또는 "web"
-        
-    CRAG 패턴 구현 (Corrective RAG):
-        1. 먼저 RAG 검색 시도
-        2. 관련 문서 충분 → RAG 결과 반환 (source="rag")
-        3. 관련 문서 부족 → 웹 검색 자동 전환 (source="web")
-        4. 최종 컨텍스트 반환
-    
-    처리 흐름:
-        ```
-        쿼리
-          ↓
-        [RAG 검색]
-          ↓
-        관련 문서 있나?
-          ├─ YES → RAG 결과 반환, source="rag"
-          ├─ NO → [웹 검색]
-          │       웹 검색 결과 반환, source="web"
-          └─
-        ```
-    
-    TODO:
-        - RAG 검색 수행
-        - 결과 검증 (문서 관련성, 길이 확인)
-        - 폴백 조건 정의
-        - 웹 검색으로 전환
     """
-    # TODO: CRAG (Corrective RAG) 로직 구현
-    
     print(f"\n🔍 [search_with_fallback] 통합 검색 시작: '{query}'\n")
     
     # Step 1: RAG 검색 시도
     print("  1️⃣  RAG 검색 시도...")
-    rag_result = perform_rag_search(query)
+    rag_result = perform_rag_search(query, k=k)
     
     # Step 2: 관련 문서 충분성 판단
     if rag_result and len(rag_result) > 100:
-        # RAG 검색 성공
         print("  2️⃣  관련 문서 충분 → RAG 결과 사용")
         print(f"  ✓ 검색 소스: rag\n")
         return rag_result, "rag"
     else:
-        # RAG 검색 실패 → 웹 검색으로 폴백
         print("  2️⃣  관련 문서 부족 → 웹 검색으로 폴백")
         print("  3️⃣  웹 검색 수행...")
         web_result = perform_web_search(query)

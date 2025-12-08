@@ -9,8 +9,114 @@ Data Processor Module
   - 메타데이터 추출 및 관리
 """
 
+import os
+import json
+import glob
 from typing import List, Dict, Optional, Tuple
 import re
+import warnings
+warnings.filterwarnings("ignore")
+
+from langchain_core.documents import Document
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+
+def load_medical_data(paths: List[str]) -> List[Document]:
+    """
+    의학지식 데이터 로드 (말뭉치 데이터)
+    
+    Args:
+        paths: 말뭉치 데이터 폴더 경로 리스트
+        
+    Returns:
+        List[Document]: Document 객체 리스트
+    """
+    docs = []
+    
+    for path in paths:
+        print(f"처리 중인 경로: {path}")
+        
+        for file_path in glob.glob(os.path.join(path, "**", "*.json"), recursive=True):
+            try:
+                with open(file_path, "r", encoding="utf-8-sig") as f:
+                    data = json.load(f)
+                
+                disease = data.get("disease", "") or ""
+                
+                # 문서 내용: 질병 정보
+                page_content = disease
+                
+                # 메타데이터 구성
+                meta = {
+                    "title": data.get("title", ""),
+                    "author": data.get("author", None),
+                    "publisher": data.get("publisher", None),
+                    "department": data.get("department", None),
+                    "source_type": "medical_data",
+                    "source_path": path,
+                }
+                
+                docs.append(Document(page_content=page_content, metadata=meta))
+            except Exception as e:
+                print(f"파일 처리 오류 ({file_path}): {e}")
+                continue
+    
+    print(f"총 {len(docs)}개 의학 문서를 로드했습니다.")
+    return docs
+
+
+def load_qa_data(paths: List[str]) -> List[Document]:
+    """
+    질의응답 데이터 로드
+    
+    Args:
+        paths: 질의응답 데이터 폴더 경로 리스트
+        
+    Returns:
+        List[Document]: Document 객체 리스트
+    """
+    docs_qa = []
+    
+    for path_qa in paths:
+        print(f"처리 중인 경로: {path_qa}")
+        
+        for file_path in glob.glob(os.path.join(path_qa, "**", "*.json"), recursive=True):
+            try:
+                with open(file_path, "r", encoding="utf-8-sig") as f:
+                    data = json.load(f)
+                
+                # meta와 qa 추출
+                meta_info = data.get("meta", {})
+                qa_info = data.get("qa", {})
+                
+                # page_content: 질문 + 답변을 하나로 합치기
+                question = qa_info.get("input", "")
+                answer = qa_info.get("output", "")
+                
+                # Q&A 형태로 구성 (검색 시 더 효과적)
+                page_content = f"Q: {question}\n\nA: {answer}"
+                
+                # metadata: 메타정보 + QA 관련 정보
+                metadata = {
+                    "lifeCycle": meta_info.get("lifeCycle", ""),
+                    "department": meta_info.get("department", ""),
+                    "disease": meta_info.get("disease", ""),
+                    "question": question,
+                    "answer": answer,
+                    "source_type": "qa_data",
+                    "source_path": path_qa
+                }
+                
+                docs_qa.append(Document(page_content=page_content, metadata=metadata))
+            except Exception as e:
+                print(f"파일 처리 오류 ({file_path}): {e}")
+                continue
+    
+    print(f"총 {len(docs_qa)}개 QA 문서를 로드했습니다.")
+    return docs_qa
 
 
 def preprocess_document(file_path: str) -> List[str]:
@@ -22,49 +128,12 @@ def preprocess_document(file_path: str) -> List[str]:
         
     Returns:
         List[str]: 전처리된 청크 리스트
-            각 청크는 의미 있는 단위로 분할된 텍스트
-            예: ["청크1 텍스트...", "청크2 텍스트...", ...]
-        
-    처리 순서:
-        1️⃣  [파일 로드] 파일 형식 감지 및 로드 (JSON/TXT/PDF)
-        2️⃣  [텍스트 추출] JSON → dict → 필드별 텍스트 추출
-        3️⃣  [전처리] 불필요한 공백/특수문자 정규화
-        4️⃣  [청킹] 의미 단위로 문서 분할 (chunk_size=500, overlap=50)
-        5️⃣  [검증] 빈 청크 제거, 최소 길이 확인
-        
-    예시:
-        입력: "data/disease/disease_001.json"
-        
-        파일 내용:
-        {
-            "disease_name": "강아지 피부염",
-            "symptoms": "가려움증, 털 손실",
-            "treatment": "약물 치료..."
-        }
-        
-        출력:
-        [
-            "강아지 피부염 증상: 가려움증, 털 손실",
-            "강아지 피부염 치료 방법: 약물 치료..."
-        ]
-    
-    TODO:
-        - 파일 형식별 로더 구현 (load_json, load_txt, load_pdf)
-        - 텍스트 정규화 함수 구현
-        - 의미 기반 청킹 또는 고정 크기 청킹 구현
-        - 메타데이터 추출 (제목, 출처 등)
     """
-    # 파일 형식 감지
-    file_ext = file_path.split('.')[-1].lower()
-    
-    # 더미 데이터: 전처리된 청크 리스트 반환
-    chunks = [
-        f"[청크 1] 문서: {file_path}\n문서 내용 청크 1: 의료 정보 관련 텍스트...",
-        f"[청크 2] 문서: {file_path}\n문서 내용 청크 2: 치료 방법 관련 텍스트..."
-    ]
-    
-    print(f"📄 [preprocess_document] {file_path} 처리 완료 → {len(chunks)}개 청크 생성")
-    return chunks
+    # 단일 파일 처리는 batch_preprocess_documents를 통해 처리
+    results = batch_preprocess_documents([file_path])
+    if results:
+        return [chunk.page_content for chunk in results]
+    return []
 
 
 def clean_text(text: str) -> str:
@@ -183,61 +252,128 @@ def extract_metadata(file_path: str, text: str) -> Dict[str, str]:
     return metadata
 
 
+def chunk_documents(docs: List[Document]) -> List[Document]:
+    """
+    문서들을 청킹 처리
+    
+    Args:
+        docs: Document 객체 리스트
+        
+    Returns:
+        List[Document]: 청킹된 Document 객체 리스트
+    """
+    # 데이터 타입별 splitter 정의
+    splitter_map = {
+        # 의학 데이터 (긴 설명문)
+        "medical_data": RecursiveCharacterTextSplitter(
+            chunk_size=500,
+            chunk_overlap=100,
+            separators=['\n\n', '\n', '.', '!', '?', ',', ' ', '']
+        ),
+        
+        # QA 데이터 (질문-답변 쌍)
+        "qa_data": RecursiveCharacterTextSplitter(
+            chunk_size=800,  # QA는 더 큰 청크로
+            chunk_overlap=50,
+            separators=['\n\nA:', 'Q:', '\n\n', '\n', '.', ' ', '']
+        )
+    }
+    
+    # 기본 splitter (매칭되지 않는 경우)
+    default_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=300,
+        chunk_overlap=50,
+        separators=['\n\n', '\n', '.', ',', ' ', '']
+    )
+    
+    chunked_docs = []
+    
+    print(f"\n청킹 대상 원본 Document 수: {len(docs)}개")
+    
+    # 각 문서의 source_type에 따라 다른 splitter 적용
+    for doc in docs:
+        source_type = doc.metadata.get("source_type", "")
+        
+        # 데이터 타입에 맞는 splitter 선택
+        if source_type == "medical_data":
+            splitter = splitter_map["medical_data"]
+        elif source_type == "qa_data":
+            splitter = splitter_map["qa_data"]
+        else:
+            splitter = default_splitter
+        
+        # 청킹 실행
+        chunks = splitter.split_documents([doc])
+        
+        # 청킹된 문서들에 원본 메타데이터 보존 + 청킹 정보 추가
+        for i, chunk in enumerate(chunks):
+            chunk.metadata.update({
+                "chunk_index": i,
+                "total_chunks": len(chunks),
+                "chunk_method": source_type
+            })
+        
+        chunked_docs.extend(chunks)
+    
+    print(f"최종 청킹 결과: {len(chunked_docs)}개 Document")
+    return chunked_docs
+
+
 def batch_preprocess_documents(
     file_paths: List[str],
     chunk_size: int = 500
-) -> List[Dict[str, any]]:
+) -> List[Document]:
     """
     여러 문서를 배치로 전처리
     
     Args:
-        file_paths (List[str]): 처리할 파일 경로 리스트
+        file_paths (List[str]): 처리할 파일 경로 리스트 (폴더 경로)
         chunk_size (int): 청크 크기
         
     Returns:
-        List[Dict[str, any]]: 각 문서별 처리 결과
-            [
-                {
-                    'file_path': 'path/to/file',
-                    'chunks': ['청크1', '청크2', ...],
-                    'chunk_count': 2,
-                    'metadata': {...}
-                },
-                ...
-            ]
-    
-    TODO:
-        - 배치 처리 로직
-        - 에러 처리 (파일 없음 등)
-        - 진행률 표시
+        List[Document]: 청킹된 Document 객체 리스트
     """
-    # TODO: 배치 처리 로직
+    print(f"\n🔄 [batch_preprocess_documents] 배치 처리 시작\n")
     
-    results = []
+    # 의학 데이터 경로와 QA 데이터 경로 분리
+    medical_paths = [p for p in file_paths if "말뭉치" in p or "medical" in p.lower()]
+    qa_paths = [p for p in file_paths if "질의응답" in p or "qa" in p.lower()]
     
-    print(f"\n🔄 [batch_preprocess_documents] {len(file_paths)}개 파일 배치 처리 시작\n")
+    # 1. 의학지식 데이터 로드
+    print("\n" + "=" * 30)
+    print("의학지식 데이터 로드 및 전처리")
+    print("=" * 30)
     
-    for idx, file_path in enumerate(file_paths, 1):
-        print(f"  [{idx}/{len(file_paths)}] 처리 중: {file_path}")
-        
-        # 각 파일 처리
-        chunks = preprocess_document(file_path)
-        
-        # 메타데이터 추출
-        text = '\n'.join(chunks)
-        metadata = extract_metadata(file_path, text)
-        
-        result = {
-            'file_path': file_path,
-            'chunks': chunks,
-            'chunk_count': len(chunks),
-            'metadata': metadata
-        }
-        
-        results.append(result)
+    docs = []
+    if medical_paths:
+        docs = load_medical_data(medical_paths)
+        if docs:
+            print(f"샘플 의학 문서:\n{docs[0].page_content[:300]}")
+            print(f"메타데이터: {docs[0].metadata}")
     
-    print(f"\n✅ 배치 처리 완료: 총 {sum(r['chunk_count'] for r in results)}개 청크 생성\n")
-    return results
+    # 2. 질의응답 데이터 로드
+    print("\n" + "=" * 30)
+    print("질의응답 데이터 로드 및 전처리")
+    print("=" * 30)
+    
+    if qa_paths:
+        docs_qa = load_qa_data(qa_paths)
+        if docs_qa:
+            print(f"샘플 QA 문서:\n{docs_qa[0].page_content[:300]}")
+            print(f"메타데이터: {docs_qa[0].metadata}")
+            docs.extend(docs_qa)
+    
+    print(f"\n최종 문서 개수: {len(docs)}개")
+    
+    # 3. 청킹
+    print("\n" + "=" * 30)
+    print("문서 청킹 처리")
+    print("=" * 30)
+    
+    chunked_docs = chunk_documents(docs)
+    
+    print(f"\n✅ 배치 처리 완료: 총 {len(chunked_docs)}개 청크 생성\n")
+    return chunked_docs
 
 
 # ==================== 엔트리 포인트 ====================
