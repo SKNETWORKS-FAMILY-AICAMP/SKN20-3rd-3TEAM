@@ -2,4 +2,6 @@
 ChromaDB/
 .vscode/
 랭그래프/
-lang/
+retriever.py
+test_retriever.py
+__pycache__/
