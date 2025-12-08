@@ -24,9 +24,24 @@ from langchain_community.document_loaders import DirectoryLoader, JSONLoader
 from langchain_core.documents import Document
 
 load_dotenv()
-
 if not os.environ.get('OPENAI_API_KEY'):
-    raise ValueError('.env 확인하세요. key가 없습니다')
+    raise ValueError('OPENAI_API_KEY 업음. env 확인해주세요')
+if not os.environ.get('LANGSMITH_API_KEY'):
+    raise ValueError('LANGSMITH_API_KEY 없음. env 확인해주세요')
+
+
+'''
+LangSmith 연결(env 셋팅 돼있어야 합니다!)
+# pip install -U langchain langsmith (한번만 실행)
+'''
+
+
+os.environ["LANGSMITH_TRACING_V2"] = "true" #기본값 false
+os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
+os.environ["LANGSMITH_PROJECT"]="pet_rag" #프로젝트 이름
+print("LangSmith 연결 완료")
+
+
 
 '''
 벡터 DB 불러오기
@@ -144,10 +159,7 @@ def format_docs(docs):
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
 # 예시 질문으로 프롬포트 성능 테스트
-query = ["우리 강아지가 갑자기 구토를 시작했어요. 며칠 전부터 식욕도 없고 기운이 없어 보여서 걱정입니다. 어떤 원인일 수 있을까요? 집에서 어떻게 돌봐줘야 하나요?",
-         "바닷속에서 가장 유명한 강아지는 누구인가요?",
-         "우리 강아지가 노견인데 기침을하다가 오늘 기절했어 의심되는 질환이 뭔지 알려주고, 위험도가 어느정도인가요?",
-         "나 배고파"]
+query = ["우리 강아지가 작년에 유행한 전염병에 걸렸어."]
 
 
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
@@ -155,7 +167,6 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": 5}, search_type="simila
 
 rewrite_chain =  rewrite_prompt | llm | StrOutputParser()
 rag_chain = prompt | llm | StrOutputParser()
-
 
 
 for q in query:
