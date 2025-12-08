@@ -144,7 +144,7 @@ def format_docs(docs):
 
 
 # 1단계: Threshold 기반 Retriever
-def threshold_retriever(query, threshold=0.5, k=10):
+def threshold_retriever(query, threshold=0.35, k=10):
     """
     유사도 임계값을 사용하는 retriever
     
@@ -169,7 +169,7 @@ def threshold_retriever(query, threshold=0.5, k=10):
 
 
 # 2단계: MMR 기반 Retriever
-def mmr_retriever(query, threshold=0.5, k=10, fetch_k=20, lambda_mult=0.5):
+def mmr_retriever(query, threshold=0.35, k=10, fetch_k=20, lambda_mult=0.5):
     """
     MMR(Maximal Marginal Relevance)을 사용하는 retriever
     유사도가 높으면서도 다양성을 고려한 문서 검색
@@ -210,7 +210,7 @@ def mmr_retriever(query, threshold=0.5, k=10, fetch_k=20, lambda_mult=0.5):
 
 
 # 3단계: Ensemble Retriever (벡터 + BM25)
-def ensemble_retriever(query, threshold=0.5, k=10, vector_weight=0.5, bm25_weight=0.5):
+def ensemble_retriever(query, threshold=0.35, k=10, vector_weight=0.5, bm25_weight=0.5):
     """
     Ensemble Retriever: 벡터 검색 + BM25 키워드 검색 결합
     
@@ -278,7 +278,7 @@ def ensemble_retriever(query, threshold=0.5, k=10, vector_weight=0.5, bm25_weigh
 
 
 # 통합 검색 함수
-def multi_stage_retriever(query, stage=1, threshold=0.5, k=10):
+def multi_stage_retriever(query, stage=1, threshold=0.35, k=10):
     """
     다단계 검색 전략
     
@@ -330,15 +330,29 @@ rag_chain = prompt | llm | StrOutputParser()
 
 # 예시 질문으로 테스트
 query_list = [
-    "우리 강아지가 갑자기 구토를 시작했어요. 며칠 전부터 식욕도 없고 기운이 없어 보여서 걱정입니다. 어떤 원인일 수 있을까요? 집에서 어떻게 돌봐줘야 하나요?",
-    "바닷속에서 가장 유명한 강아지는 누구인가요?",
-    "우리 강아지가 노견인데 기침을하다가 오늘 기절했어 의심되는 질환이 뭔지 알려주고, 위험도가 어느정도인가요?",
-    "나 배고파"
+    # "우리 강아지가 갑자기 구토를 시작했어요. 며칠 전부터 식욕도 없고 기운이 없어 보여서 걱정입니다. 어떤 원인일 수 있을까요? 집에서 어떻게 돌봐줘야 하나요?",
+    # "바닷속에서 가장 유명한 강아지는 누구인가요?",
+    # "우리 강아지가 노견인데 기침을하다가 오늘 기절했어 의심되는 질환이 뭔지 알려주고, 위험도가 어느정도인가요?",
+    # "나 배고파",
+    # "강아지가 기절함",
+    '강아지의 심장 사상충 감염은 어떻게 진단하나요?',
+    '반려견의 슬개골 탈구 4단계는 구체적으로 어떤 상태를 의미하며, 치료 방법은 무엇인가요?',
+    '어린 고양이(자묘)의 예방 접종 스케줄과 성묘의 치과 검진 주기를 모두 설명해 주세요.',
+    '강아지의 알레르기 피부염과 아토피 피부염의 주요 차이점은 무엇이며, 보호자 입장에서 가장 먼저 시도할 수 있는 관리는 무엇인가요?',
+    '중성화 수술 후 반려견의 식단 관리는 어떻게 해야 하며, 권장되는 운동량은 어느 정도인가요?',
+    '우리 집 늙은 개가 자꾸 물을 많이 마시고 오줌을 자주 누는 현상이 심해지고 있는데, 의심해 볼 수 있는 내과 질환은 무엇인가요?',
+    '고양이의 감기에 걸리면 사람처럼 항생제를 먹여야만 낫나요?',
+    '동물 병원에서 안과 질환 진료 시 사용하는 기본적인 검사 장비들에 대해 알려주세요.',
+    '한국에 없는 특이한 외래종 앵무새의 먹이는 무엇인가요?',
+    '강아지가 췌장염에 걸렸을 때의 초기 증상부터 입원 후 치료 과정, 그리고 퇴원 후 보호자가 관리해야 할 식이요법까지 상세하게 알려주세요.',
+
+
 ]
 
 
+
 # 3단계 비교 테스트 함수
-def compare_all_stages(query, threshold=0.5, k=5):
+def compare_all_stages(query, threshold=0.35, k=5):
     """
     1단계, 2단계, 3단계 검색을 모두 비교
     """
@@ -382,15 +396,28 @@ def compare_all_stages(query, threshold=0.5, k=5):
 # 테스트 실행 예시
 if __name__ == "__main__":
     # 특정 질문에 대해 3단계 모두 비교
-    test_query = "강아지가 기운이 없어하고 식욕이 없어요. 어떤 질병일 수 있나요?"
-    compare_all_stages(test_query, threshold=0.8, k=5)
+    if __name__ == "__main__":
+    # 기절 관련 문서가 실제로 있는지 확인
+        test_results = vectorstore.similarity_search_with_score("기절", k=10)
+        
+        print("\n=== '기절' 검색 결과 ===")
+        for i, (doc, score) in enumerate(test_results, 1):
+            title = doc.metadata.get('disease', '') or doc.metadata.get('title', 'Unknown')
+            print(f"{i}. [{score:.3f}] {title}")
+            print(f"   내용: {doc.page_content[:100]}...")
+    test_query = "강아지가 기절함"
+    compare_all_stages(test_query, threshold=0.35, k=5)
     
     # 또는 개별 단계 테스트
-    # print("\n=== 3단계 Ensemble 테스트 ===")
-    # for q in query_list:
-    #     docs = multi_stage_retriever(q, stage=3, threshold=0.5, k=5)
-    #     context = format_docs(docs)
-    #     generation = rag_chain.invoke({"context": context, "question": q})
-    #     print(f"\n질문: {q}")
-    #     print(f"답변:\n{generation}\n")
-    #     print("="*80)
+    print("\n=== 3단계 Ensemble 테스트 ===")
+    for q in query_list:
+        docs = multi_stage_retriever(q, stage=3, threshold=0.35, k=5)
+        context = format_docs(docs)
+        generation = rag_chain.invoke({"context": context, "question": q})
+        print(f"\n질문: {q}")
+        print(f"답변:\n{generation}\n")
+        print("="*80)
+
+
+
+
