@@ -32,6 +32,7 @@ if not os.environ.get('LANGSMITH_API_KEY'):
 
 '''
 LangSmith 연결(env 셋팅 돼있어야 합니다!)
+
 # pip install -U langchain langsmith (한번만 실행)
 '''
 
