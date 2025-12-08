@@ -417,7 +417,3 @@ if __name__ == "__main__":
         print(f"\n질문: {q}")
         print(f"답변:\n{generation}\n")
         print("="*80)
-
-
-
-
