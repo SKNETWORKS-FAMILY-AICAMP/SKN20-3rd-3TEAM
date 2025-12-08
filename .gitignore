@@ -2,3 +2,4 @@
 1.데이터/
 chroma_db/
 chroma_db/*.sqlite3
+chroma_db/chroma.sqlite3
