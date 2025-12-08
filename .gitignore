@@ -3,3 +3,6 @@ ChromaDB/
 .vscode/
 랭그래프/
 lang/
+1.데이터/
+chroma_db/
+__pycache__/
