@@ -15,7 +15,9 @@ from streamlit_geolocation import streamlit_geolocation
 
 # 프로젝트 루트 경로 추가
 project_root = Path(__file__).parent
-sys.path.append(str(project_root / 'src'))
+src_path = project_root / 'src'
+sys.path.insert(0, str(src_path))
+sys.path.insert(0, str(project_root))
 
 # ============================================================================
 # RAG Core 모듈 Import (기존 파이프라인 활용)
@@ -24,14 +26,17 @@ try:
     from dotenv import load_dotenv
     load_dotenv()
     
-    from agent.workflow import run_agent
-    from utils.optimization import manage_persistence, get_project_path
+    # src 폴더 안의 모듈들 import
+    from src.agent.workflow import run_agent
+    from src.utils.optimization import manage_persistence, get_project_path
     
     RAG_AVAILABLE = True
     print("✅ RAG 모듈 로드 완료")
 except ImportError as e:
     RAG_AVAILABLE = False
     print(f"⚠️ RAG 모듈 로드 실패: {e}")
+    import traceback
+    traceback.print_exc()
 
 
 # ============================================================================
