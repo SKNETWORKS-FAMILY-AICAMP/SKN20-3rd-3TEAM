@@ -6,11 +6,31 @@ warnings.filterwarnings("ignore")
 # LangChain 최신 버전 임포트
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_chroma import Chroma
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate,PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 from typing import List
+
+load_dotenv()
+if not os.environ.get('OPENAI_API_KEY'):
+    raise ValueError('.env 확인하세요. key가 없습니다')
+if not os.environ.get('LANGSMITH_API_KEY'):
+    raise ValueError('LANGSMITH_API_KEY 없음. env 확인해주세요')
+
+'''
+LangSmith 연결(env 셋팅 돼있어야 합니다!)
+# pip install -U langchain langsmith (한번만 실행)
+'''
+
+
+os.environ["LANGSMITH_TRACING_V2"] = "true" #기본값 false
+os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
+os.environ["LANGSMITH_PROJECT"]="pet_rag" #프로젝트 이름
+print("LangSmith 연결 완료")
+
+
+
 
 # EnsembleRetriever 직접 구현
 class EnsembleRetriever:
@@ -111,6 +131,19 @@ prompt = ChatPromptTemplate.from_messages([
 """)
 ])
 
+# rewrite 프롬프트 
+# 사용자의 질문을 키워드 중심으로 정리해 llm 전달 (검색 최적화된 형태로 질문 바꿔줌) 
+rewrite_prompt= PromptTemplate.from_template(
+    '''
+    다음 질문을 검색에 더 적합한 형태로 변환해 주세요.
+    키워드 중심으로 명확하게 바꿔주세요
+    변환된 검색어만 출력하세요
+
+    원본 질문: {question}
+    변환된 검색어:
+    ''')
+
+
 
 # 문서 포맷팅 함수
 def format_docs(docs):
@@ -143,254 +176,27 @@ def format_docs(docs):
     return "\n\n".join(formatted_docs)
 
 
-# 1단계: Threshold 기반 Retriever
-def threshold_retriever(query, threshold=0.5, k=10):
-    """
-    유사도 임계값을 사용하는 retriever
-    
-    Args:
-        query: 검색 쿼리
-        threshold: 최소 유사도 임계값 (0~1, 낮을수록 더 유사)
-        k: 검색할 최대 문서 수
-    
-    Returns:
-        임계값을 넘는 관련 문서 리스트
-    """
-    results = vectorstore.similarity_search_with_score(query, k=k)
-    
-    # 임계값 이하의 문서만 필터링 (거리가 작을수록 유사도 높음)
-    filtered_docs = [doc for doc, score in results if score <= threshold]
-    
-    print(f"[1단계 Threshold] 검색된 문서: {len(results)}개 중 {len(filtered_docs)}개가 임계값({threshold}) 통과")
-    if results:
-        print(f"  유사도 범위: {results[0][1]:.3f} ~ {results[-1][1]:.3f}")
-    
-    return filtered_docs
-
-
-# 2단계: MMR 기반 Retriever
-def mmr_retriever(query, threshold=0.5, k=10, fetch_k=20, lambda_mult=0.5):
-    """
-    MMR(Maximal Marginal Relevance)을 사용하는 retriever
-    유사도가 높으면서도 다양성을 고려한 문서 검색
-    
-    Args:
-        query: 검색 쿼리
-        threshold: 최소 유사도 임계값
-        k: 최종 반환할 문서 수
-        fetch_k: MMR 계산을 위해 초기에 가져올 문서 수
-        lambda_mult: 유사도와 다양성의 균형 (0~1)
-                    1에 가까울수록 유사도 우선
-                    0에 가까울수록 다양성 우선
-    
-    Returns:
-        MMR로 선택된 관련 문서 리스트
-    """
-    # MMR 검색 수행
-    mmr_docs = vectorstore.max_marginal_relevance_search(
-        query, 
-        k=k,
-        fetch_k=fetch_k,
-        lambda_mult=lambda_mult
-    )
-    
-    # 임계값 필터링을 위해 유사도 점수 확인
-    # MMR 결과에 대해 다시 유사도 계산
-    filtered_docs = []
-    for doc in mmr_docs:
-        # 각 문서의 유사도 점수 계산
-        score_results = vectorstore.similarity_search_with_score(doc.page_content, k=1)
-        if score_results and score_results[0][1] <= threshold:
-            filtered_docs.append(doc)
-    
-    print(f"[2단계 MMR] fetch_k={fetch_k}개 중 k={k}개 선택 → 임계값 필터링 후 {len(filtered_docs)}개")
-    print(f"  lambda_mult={lambda_mult} (유사도 vs 다양성 균형)")
-    
-    return filtered_docs
-
-
-# 3단계: Ensemble Retriever (벡터 + BM25)
-def ensemble_retriever(query, threshold=0.5, k=10, vector_weight=0.5, bm25_weight=0.5):
-    """
-    Ensemble Retriever: 벡터 검색 + BM25 키워드 검색 결합
-    
-    Args:
-        query: 검색 쿼리
-        threshold: 유사도 임계값
-        k: 최종 반환할 문서 수
-        vector_weight: 벡터 검색 가중치 (0~1)
-        bm25_weight: BM25 검색 가중치 (0~1)
-    
-    Returns:
-        Ensemble로 선택된 관련 문서 리스트
-    """
-    print(f"[3단계 Ensemble] 벡터({vector_weight}) + BM25({bm25_weight}) 결합")
-    
-    # 벡터스토어에서 모든 문서 가져오기 (BM25용)
-    # 효율성을 위해 상위 1000개만 사용
-    all_docs_results = vectorstore.similarity_search("", k=1000)
-    
-    if not all_docs_results:
-        print("  ⚠️ 문서를 가져올 수 없습니다.")
-        return []
-    
-    # BM25 Retriever 생성
-    bm25_retriever = BM25Retriever.from_documents(all_docs_results)
-    bm25_retriever.k = k
-    
-    # 벡터 Retriever 생성
-    vector_retriever = vectorstore.as_retriever(
-        search_kwargs={"k": k}
-    )
-    
-    # Ensemble Retriever 생성 (직접 구현한 클래스 사용)
-    ensemble = EnsembleRetriever(
-        retrievers=[vector_retriever, bm25_retriever],
-        weights=[vector_weight, bm25_weight]
-    )
-    
-    # Ensemble 검색 수행
-    ensemble_docs = ensemble.invoke(query)
-    
-    print(f"  Ensemble 검색 결과: {len(ensemble_docs)}개 문서")
-    
-    # 임계값 필터링
-    filtered_docs = []
-    for doc in ensemble_docs:
-        score_results = vectorstore.similarity_search_with_score(doc.page_content, k=1)
-        if score_results and score_results[0][1] <= threshold:
-            filtered_docs.append(doc)
-    
-    print(f"  임계값 필터링 후: {len(filtered_docs)}개 문서")
-    
-    # 중복 제거 (같은 content를 가진 문서)
-    unique_docs = []
-    seen_contents = set()
-    for doc in filtered_docs:
-        content_hash = hash(doc.page_content)
-        if content_hash not in seen_contents:
-            seen_contents.add(content_hash)
-            unique_docs.append(doc)
-    
-    print(f"  중복 제거 후: {len(unique_docs)}개 문서")
-    
-    return unique_docs[:k]  # k개만 반환
-
-
-# 통합 검색 함수
-def multi_stage_retriever(query, stage=1, threshold=0.5, k=10):
-    """
-    다단계 검색 전략
-    
-    Args:
-        query: 검색 쿼리
-        stage: 검색 단계 (1: Threshold, 2: MMR, 3: Ensemble)
-        threshold: 유사도 임계값
-        k: 반환할 문서 수
-    
-    Returns:
-        검색된 문서 리스트
-    """
-    print(f"\n{'='*60}")
-    print(f"검색 쿼리: {query}")
-    print(f"검색 단계: {stage}단계")
-    print(f"{'='*60}")
-    
-    if stage == 1:
-        # 1단계: Threshold만 사용
-        docs = threshold_retriever(query, threshold=threshold, k=k)
-    elif stage == 2:
-        # 2단계: MMR 검색
-        docs = mmr_retriever(
-            query, 
-            threshold=threshold, 
-            k=k, 
-            fetch_k=k*2,
-            lambda_mult=0.5
-        )
-    elif stage == 3:
-        # 3단계: Ensemble (벡터 + BM25)
-        docs = ensemble_retriever(
-            query,
-            threshold=threshold,
-            k=k,
-            vector_weight=0.5,
-            bm25_weight=0.5
-        )
-    else:
-        raise ValueError("stage는 1, 2, 3 중 하나여야 합니다.")
-    
-    return docs
-
-
-# LLM 및 체인 설정
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-rag_chain = prompt | llm | StrOutputParser()
-
-
 # 예시 질문으로 테스트
 query_list = [
     "우리 강아지가 갑자기 구토를 시작했어요. 며칠 전부터 식욕도 없고 기운이 없어 보여서 걱정입니다. 어떤 원인일 수 있을까요? 집에서 어떻게 돌봐줘야 하나요?",
     "바닷속에서 가장 유명한 강아지는 누구인가요?",
     "우리 강아지가 노견인데 기침을하다가 오늘 기절했어 의심되는 질환이 뭔지 알려주고, 위험도가 어느정도인가요?",
-    "나 배고파"
+    "나 배고파",
+    "강아지가 기침을 하다가 기절함"
 ]
 
-
-# 3단계 비교 테스트 함수
-def compare_all_stages(query, threshold=0.5, k=5):
-    """
-    1단계, 2단계, 3단계 검색을 모두 비교
-    """
-    print("\n" + "🔍"*40)
-    print(f"질문: {query}")
-    print("🔍"*40)
-    
-    stages = [
-        (1, "Threshold Only"),
-        (2, "MMR (다양성)"),
-        (3, "Ensemble (벡터+BM25)")
-    ]
-    
-    for stage_num, stage_name in stages:
-        print(f"\n{'='*80}")
-        print(f"[{stage_num}단계: {stage_name}]")
-        print(f"{'='*80}")
-        
-        # 검색 수행
-        docs = multi_stage_retriever(query, stage=stage_num, threshold=threshold, k=k)
-        
-        # 검색된 문서 제목 출력
-        print("\n검색된 문서:")
-        for i, doc in enumerate(docs, 1):
-            metadata = doc.metadata
-            title = metadata.get('disease', '') or metadata.get('title', 'Unknown')
-            source_type = metadata.get('source_type', 'unknown')
-            print(f"  {i}. [{source_type}] {title}")
-        
-        # RAG 답변 생성
-        context = format_docs(docs)
-        answer = rag_chain.invoke({"context": context, "question": query})
-        
-        print(f"\n📝 답변:\n{answer}\n")
-    
-    print("\n" + "="*80)
-    print("비교 완료!")
-    print("="*80)
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+retriever = vectorstore.as_retriever(search_kwargs={"k": 5}, search_type="similarity") #리트리버 변경 가능
+rewrite_chain =  rewrite_prompt | llm | StrOutputParser()
+rag_chain = prompt | llm | StrOutputParser()
 
 
-# 테스트 실행 예시
-if __name__ == "__main__":
-    # 특정 질문에 대해 3단계 모두 비교
-    test_query = "강아지가 기운이 없어하고 식욕이 없어요. 어떤 질병일 수 있나요?"
-    compare_all_stages(test_query, threshold=0.8, k=5)
-    
-    # 또는 개별 단계 테스트
-    # print("\n=== 3단계 Ensemble 테스트 ===")
-    # for q in query_list:
-    #     docs = multi_stage_retriever(q, stage=3, threshold=0.5, k=5)
-    #     context = format_docs(docs)
-    #     generation = rag_chain.invoke({"context": context, "question": q})
-    #     print(f"\n질문: {q}")
-    #     print(f"답변:\n{generation}\n")
-    #     print("="*80)
+for q in query_list:
+    docs = retriever.invoke(q)
+    context = format_docs(docs)
+    transformed = rewrite_chain.invoke({'question' : q}) #rewrite_chain의 출력(question 키워드)을 transformed에 저장
+    generation = rag_chain.invoke({"context": context, "question": transformed})
+    print("="*30)
+    print(f'원본 query : {q}\n')
+    print(f'transformed query (핵심 키워드 추출) : {transformed}\n')
+    print(f"답변: {generation}\n")
