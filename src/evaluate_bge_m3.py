@@ -39,6 +39,9 @@ from langchain_community.retrievers import BM25Retriever
 from typing import Any, List
 from ensemble import EnsembleRetriever
 
+# base_dir 정의 (파일 경로 설정)
+base_dir = os.path.dirname(os.path.abspath(__file__))
+
 load_dotenv()
 if not os.environ.get('OPENAI_API_KEY'):
     raise ValueError('.env 확인하세요. key가 없습니다')
@@ -76,16 +79,17 @@ embeddings = HuggingFaceEmbeddings(
 # RAGAS용 embeddings wrapper 생성
 ragas_embeddings = LangchainEmbeddingsWrapper(embeddings=embeddings)
 
-#벡터스토어 로드 (bge_m3로 생성된 벡터스토어)
+#벡터스토어 로드 (bge_m3로 생성된 벡터스토어) - 절대 경로 사용
 # 컬렉션 이름은 bge_m3 벡터스토어 생성시 사용한 이름으로 변경해야 합니다
+chroma_path = os.path.join(base_dir, '..', 'data', 'ChromaDB_bge_m3')
 vectorstore = Chroma(
-persist_directory=r"..\data\ChromaDB_bge_m3", #DB 저장한 경로
+persist_directory=chroma_path,
 collection_name="pet_health_qa_system_bge_m3",  # bge_m3 벡터스토어의 컬렉션 이름으로 변경 필요
 embedding_function=embeddings)
 print("벡터스토어가 성공적으로 로드되었습니다!")
 
 #컬렉션 확인
-client = chromadb.PersistentClient(path=r"..\data\ChromaDB_bge_m3")
+client = chromadb.PersistentClient(path=chroma_path)
 collections = client.list_collections()
 print("사용 가능한 컬렉션:", [c.name for c in collections])
 
@@ -187,8 +191,9 @@ def format_docs(docs):
 # RAGAS 평가용 테스트 데이터셋 로드 (CSV 파일)
 import json
 
-# CSV 파일에서 데이터셋 로드
-dataset_df = pd.read_csv(r'..\output\pet_test_dataset_bge_m3.csv')
+# CSV 파일에서 데이터셋 로드 (절대 경로 사용)
+csv_path = os.path.join(base_dir, '..', 'output', 'pet_test_dataset_bge_m3.csv')
+dataset_df = pd.read_csv(csv_path)
 
 # 질문과 답변(reference) 추출
 query = dataset_df['user_input'].tolist()
@@ -196,6 +201,13 @@ ground_truths = dataset_df['reference'].tolist()
 
 print(f"✓ 테스트 데이터셋 로드 완료: {len(query)}개 Q&A 쌍 로드됨")
 print(f"  - 사용 데이터: pet_test_dataset_bge_m3.csv")
+
+# 디버깅: ground_truths 확인
+print(f"\n[디버깅 정보]")
+print(f"  - 질문 수: {len(query)}")
+print(f"  - Ground Truth 수: {len(ground_truths)}")
+print(f"  - 첫 번째 질문: {query[0][:50]}...")
+print(f"  - 첫 번째 Ground Truth: {ground_truths[0][:50] if ground_truths[0] else 'None'}...")
 
 
 llm = ChatOpenAI(model="gpt-4.1", temperature=0)
@@ -281,11 +293,13 @@ for name, temp_retriever in retriever_dict.items():
     
     # Dataset 생성 (RAGAS 형식에 맞춤)
     # 4대 지표 계산을 위해 reference(ground truth) 추가
+    # RAGAS는 다음 컬럼명을 사용합니다:
+    # user_input(질문), response(답변), retrieved_contexts(검색된 문서), reference(정답)
     dataset_dict = {
-        "question": questions,
-        "answer": answers,
-        "contexts": contexts_list,
-        "ground_truth": ground_truths,  # context_recall, context_precision 계산에 필요
+        "user_input": questions,
+        "response": answers,
+        "retrieved_contexts": contexts_list,
+        "reference": ground_truths,  # context_recall, context_precision 계산에 필요
     }
     
     dataset = Dataset.from_dict(dataset_dict)
@@ -338,14 +352,14 @@ for name, temp_retriever in retriever_dict.items():
 if evaluation_results:
     final_results = pd.concat(evaluation_results, ignore_index=True)
     
-    # CSV 파일로 저장 (bge_m3 결과임을 명시)
+    # CSV 파일로 저장 (절대 경로 사용, bge_m3 결과임을 명시)
     # Excel 호환성을 위해 quoting과 escapechar 설정
-    csv_filename = r"..\output\ragas_evaluation_results_bge_m3.csv"
+    csv_filename = os.path.join(base_dir, '..', 'output', 'ragas_evaluation_results_bge_m3.csv')
     final_results.to_csv(
         csv_filename, 
         index=False, 
         encoding='utf-8-sig',
-        quoting=csv.QUOTE_ALL,  # 모든 필드를 따옴표로 감싸서 Excel 호환성 향상
+        quoting=csv.QUOTE_ALL,  # 모든 필드를 따�음표로 감싸서 Excel 호환성 향상
         escapechar='\\',  # 이스케이프 문자 설정
         lineterminator='\n'  # 줄바꿈 문자 명시
     )
