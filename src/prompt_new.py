@@ -255,3 +255,4 @@ for name, retriever in retriever_dict.items():
         print(f'transformed query (핵심 키워드 추출) : {transformed}\n')
         print(f"답변: {generation}\n")
 
+# test
