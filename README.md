@@ -2,19 +2,36 @@
 
 **강아지 질병 증상 상담 챗봇**
 
----
-
 ## 👥 팀원 소개
 
-| 이름 | 역할 |
-|------|------|
-| **박찬** | 팀장 |
-| **김나현** | 팀원 |
-| **이도경** | 팀원 |
-| **안채연** | 팀원 |
-| **이경현** | 팀원 |
+<div align="center">
 
----
+<table>
+  <tr>
+    <td align="center" width="150">
+      <img src="./images/totoro.png" width="120" height="120">
+      <br><b>박찬</b><br>팀장
+    </td>
+    <td align="center" width="150">
+      <img src="./images/gon.png" width="120" height="120">
+      <br><b>김나현</b><br>팀원
+    </td>
+    <td align="center" width="150">
+      <img src="./images/patrick.png" width="120" height="120">
+      <br><b>이도경</b><br>팀원
+    </td>
+    <td align="center" width="150">
+      <img src="./images/maenggu.png" width="120" height="120">
+      <br><b>안채연</b><br>팀원
+    </td>
+    <td align="center" width="150">
+      <img src="./images/dipsy.png" width="120" height="120">
+      <br><b>이경현</b><br>팀원
+    </td>
+  </tr>
+</table>
+
+</div>
 
 ## 📌 프로젝트 개요
 
