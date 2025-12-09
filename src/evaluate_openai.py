@@ -176,19 +176,18 @@ def format_docs(docs):
 
 
 
-# RAGAS 평가용 Ground Truth 데이터셋 로드
+# RAGAS 평가용 테스트 데이터셋 로드 (CSV 파일)
 import json
 
-# JSON 파일에서 데이터셋 로드
-with open(r'..\data\ragas_ground_truth_dataset.json', 'r', encoding='utf-8') as f:
-    dataset_json = json.load(f)
+# CSV 파일에서 데이터셋 로드
+dataset_df = pd.read_csv(r'..\output\pet_test_dataset_openai.csv')
 
-# 질문과 Ground Truth 추출
-query = [item['question'] for item in dataset_json['data']]
-ground_truths = [item['ground_truth'] for item in dataset_json['data']]
+# 질문과 답변(reference) 추출
+query = dataset_df['user_input'].tolist()
+ground_truths = dataset_df['reference'].tolist()
 
-print(f"✓ Ground Truth 데이터셋 로드 완료: {len(query)}개 Q&A 쌍 로드됨")
-print(f"  - 임상 분야: {', '.join(set([item['category'].split(' - ')[0] for item in dataset_json['data']]))}")
+print(f"✓ 테스트 데이터셋 로드 완료: {len(query)}개 Q&A 쌍 로드됨")
+print(f"  - 사용 데이터: pet_test_dataset_openai.csv")
 
 
 llm = ChatOpenAI(model="gpt-4.1", temperature=0)
