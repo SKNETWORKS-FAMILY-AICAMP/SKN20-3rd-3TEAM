@@ -1,4 +1,10 @@
 .env
-1.데이터/
-chroma_db/
-data/
+data/ChromaDB_bge_m3
+data/ChromaDB_openai
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python

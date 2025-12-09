@@ -42,11 +42,11 @@ print("의학지식 데이터 로드 및 전처리")
 print("=" * 30)
 
 paths = [
-    r".\3차 프로젝트\data\말뭉치\TS_말뭉치데이터_내과",
-    r".\3차 프로젝트\data\말뭉치\TS_말뭉치데이터_안과",
-    r".\3차 프로젝트\data\말뭉치\TS_말뭉치데이터_외과",
-    r".\3차 프로젝트\data\말뭉치\TS_말뭉치데이터_치과",
-    r".\3차 프로젝트\data\말뭉치\TS_말뭉치데이터_피부과"]
+    r"..\3차 프로젝트\data\말뭉치\TS_말뭉치데이터_내과",
+    r"..\3차 프로젝트\data\말뭉치\TS_말뭉치데이터_안과",
+    r"..\3차 프로젝트\data\말뭉치\TS_말뭉치데이터_외과",
+    r"..\3차 프로젝트\data\말뭉치\TS_말뭉치데이터_치과",
+    r"..\3차 프로젝트\data\말뭉치\TS_말뭉치데이터_피부과"]
      
 
 docs = []
@@ -90,11 +90,11 @@ print("질의응답 데이터 로드 및 전처리")
 print("=" * 30)
 
 paths_qa = [
-    r".\3차 프로젝트\data\qa\TL_질의응답데이터_내과",
-    r".\3차 프로젝트\data\qa\TL_질의응답데이터_안과",
-    r".\3차 프로젝트\data\qa\TL_질의응답데이터_외과",
-    r".\3차 프로젝트\data\qa\TL_질의응답데이터_치과",
-    r".\3차 프로젝트\data\qa\TL_질의응답데이터_피부과"]
+    r"..\3차 프로젝트\data\qa\TL_질의응답데이터_내과",
+    r"..\3차 프로젝트\data\qa\TL_질의응답데이터_안과",
+    r"..\3차 프로젝트\data\qa\TL_질의응답데이터_외과",
+    r"..\3차 프로젝트\data\qa\TL_질의응답데이터_치과",
+    r"..\3차 프로젝트\data\qa\TL_질의응답데이터_피부과"]
      
 docs_qa = []
 
@@ -216,6 +216,6 @@ print(f" 최종 청킹 결과: {len(chunked_docs)}개 Document")
 # 청킹 파일 저장
 
 import pickle  
-with open("chunked_docs.pkl", "wb") as f:
+with open(r"..\data\chunked_docs.pkl", "wb") as f:
     pickle.dump(chunked_docs, f)  
 print("chunked_documents.pkl 저장 완료")
