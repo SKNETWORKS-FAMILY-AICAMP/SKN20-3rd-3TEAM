@@ -16,8 +16,9 @@ from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.output_parsers import StrOutputParser, PydanticOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.documents import Document
-# from langchain_community.retrievers import BM25Retriever
-from langchain.retrievers import EnsembleRetriever,BM25Retriever
+from langchain_community.retrievers import BM25Retriever
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from ensemble import EnsembleRetriever
 
 # LangGraph 관련 임포트
 from langgraph.graph import StateGraph, START, END
@@ -52,16 +53,24 @@ print("LangSmith 연결 완료")
 '''
 
 
-embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+# embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+# bge_m3 임베딩 모델 로드
+embeddings = HuggingFaceEmbeddings(
+    model_name="BAAI/bge-m3",
+    model_kwargs={'device': 'cpu'},  # GPU 사용시 'cuda'로 변경
+    encode_kwargs={'normalize_embeddings': True}  # bge-m3는 정규화 권장
+)
 #벡터스토어 로드
 vectorstore = Chroma(
-persist_directory=r".\data\ChromaDB_openai", #DB 저장한 경로
-collection_name="pet_health_qa_system",
+# persist_directory=r"..\data\ChromaDB_openai", #DB 저장한 경로
+# collection_name="pet_health_qa_system",
+persist_directory=r"..\data\ChromaDB_bge_m3", #DB 저장한 경로
+collection_name="pet_health_qa_system_bge_m3",
 embedding_function=embeddings)
 print("벡터스토어가 성공적으로 로드되었습니다!")
 
 #컬렉션 확인
-client = chromadb.PersistentClient(path=r".\data\ChromaDB_openai")
+client = chromadb.PersistentClient(path=r"..\data\ChromaDB_bge_m3")
 collections = client.list_collections()
 print("사용 가능한 컬렉션:", [c.name for c in collections])
 
@@ -190,7 +199,32 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": 5}, search_type="simila
 #     }
 # )
 # BM25 리트리버 생성 (벡터스토어에서 문서 추출 필요)
-bm25_docs = vectorstore.similarity_search("",k=1000)  # 모든 문서 로드
+# ChromaDB에서 모든 문서를 직접 가져오기
+collection = vectorstore._collection
+doc_count = collection.count()
+print(f"벡터스토어 총 문서 수: {doc_count}개")
+
+if doc_count == 0:
+    raise ValueError("벡터스토어가 비어있습니다. 먼저 문서를 추가해주세요.")
+
+# ChromaDB의 get() 메서드를 사용하여 모든 문서 가져오기
+all_data = collection.get(limit=doc_count)
+
+# Document 객체로 변환
+bm25_docs = []
+if all_data and 'ids' in all_data and len(all_data['ids']) > 0:
+    documents = all_data.get('documents', [])
+    metadatas = all_data.get('metadatas', [])
+    
+    for i, doc_id in enumerate(all_data['ids']):
+        page_content = documents[i] if i < len(documents) else ""
+        metadata = metadatas[i] if i < len(metadatas) else {}
+        bm25_docs.append(Document(page_content=page_content, metadata=metadata))
+
+if len(bm25_docs) == 0:
+    raise ValueError("벡터스토어에서 문서를 가져올 수 없습니다.")
+
+print(f"BM25 리트리버용 문서 {len(bm25_docs)}개 로드 완료")
 retriever_bm25 = BM25Retriever.from_documents(bm25_docs) 
 # 앙상블 리트리버
 retriever_ensemble = EnsembleRetriever(
@@ -198,7 +232,7 @@ retriever_ensemble = EnsembleRetriever(
     weights=[0.5, 0.5]  # 가중치 합은 1이어야 합니다.
 ) 
 retriever_dict = {
-    "유사도 검색(Similarity Search)": retriever,
+    # "유사도 검색(Similarity Search)": retriever,
     # "MMR 검색(MMR Search)": retriever_mmr,
     # "BM25 검색(BM25 Search)": retriever_bm25,
     "앙상블 검색(Ensemble Search)": retriever_ensemble
