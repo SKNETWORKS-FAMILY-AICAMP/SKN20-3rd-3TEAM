@@ -10,11 +10,64 @@ from prompt_new import (
     initialize_rag_system,
     get_rag_prompt,
     get_rewrite_prompt,
-    format_docs,
-    filter_docs_by_response
+    format_docs
 )
 
 from langchain_core.output_parsers import StrOutputParser
+
+
+# # ---------------------------
+# # 실제 사용된 문서만 필터링하는 함수
+# # ---------------------------
+def filter_used_documents(docs, ai_response):
+    """LLM 응답에서 실제로 사용된 문서만 필터링 (더 엄격한 버전)"""
+    if not docs or not ai_response:
+        return []
+    
+    used_docs = []
+    ai_response = ai_response.strip()
+
+    for doc in docs:
+        metadata = doc.metadata
+        is_referenced = False
+
+        # -------------------------
+        # 1) 상담기록(qa_data)인 경우
+        #    lifeCycle/department/disease 전체 조합이
+        #    답변에 그대로 들어간 경우에만 "사용됨"으로 판단
+        # -------------------------
+        if metadata.get("source_type") == "qa_data":
+            lifecycle = metadata.get('lifeCycle', '').strip()
+            department = metadata.get('department', '').strip()
+            disease = metadata.get('disease', '').strip()
+
+            # "노령견/내과/기타" 형태의 라벨 생성
+            label_parts = [p for p in [lifecycle, department, disease] if p]
+            label = "/".join(label_parts)
+
+            # 답변 안에 전체 라벨이 그대로 포함된 경우만 참조된 걸로 인정
+            if label and label in ai_response:
+                is_referenced = True
+
+        # -------------------------
+        # 2) 서적/의료 데이터인 경우
+        #    제목 또는 저자가 답변에 명시된 경우만 사용된 것으로 판단
+        # -------------------------
+        else:
+            title = metadata.get('title', '').strip()
+            author = metadata.get('author', '').strip()
+
+            if title and title in ai_response:
+                is_referenced = True
+            elif author and author in ai_response:
+                is_referenced = True
+
+
+        if is_referenced:
+            used_docs.append(doc)
+
+    return used_docs
+
 
 # ---------------------------
 # 환경 설정
@@ -136,29 +189,31 @@ def show_chat():
                 "role": "user",
                 "content": user_input.strip()
             })
-            
+
             with st.spinner("답변을 준비 중입니다..."):
                 try:
-                    # 1. 질문 변환 (rewrite chain)
-                    rewrite_chain = st.session_state.rewrite_prompt | st.session_state.llm | StrOutputParser()
-                    transformed_query = rewrite_chain.invoke({"question": user_input.strip()})
+                    q = user_input.strip()
                     
-                    # 2. 벡터스토어에서 문서 검색
-                    docs = st.session_state.retriever.invoke(transformed_query)
+                    # 1. 벡터스토어에서 문서 검색
+                    docs = st.session_state.retriever.invoke(q)
                     
                     if not docs:
                         ai_response = "죄송합니다. 관련된 정보를 찾을 수 없습니다. 더 구체적으로 설명해주시겠어요?"
                         docs_to_save = []
                     else:
-                        # 3. 문서 포맷팅
+                        # 2. 문서 포맷팅
                         context = format_docs(docs)
+                        
+                        # 3. 질문 변환 (rewrite chain)
+                        rewrite_chain = st.session_state.rewrite_prompt | st.session_state.llm | StrOutputParser()
+                        transformed = rewrite_chain.invoke({"question": q})
                         
                         # 4. RAG 체인 실행
                         rag_chain = st.session_state.rag_prompt | st.session_state.llm | StrOutputParser()
-                        ai_response = rag_chain.invoke({"context": context, "question": transformed_query})
+                        ai_response = rag_chain.invoke({"context": context, "question": transformed})
                         
                         # 5. 응답에 실제로 사용된 문서만 필터링
-                        docs_to_save = filter_docs_by_response(docs, ai_response)
+                        docs_to_save = filter_used_documents(docs, ai_response)
                     
                     # AI 응답 추가
                     message_idx = len(st.session_state.chat_messages)
