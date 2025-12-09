@@ -16,6 +16,8 @@ from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.output_parsers import StrOutputParser, PydanticOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.documents import Document
+# from langchain_community.retrievers import BM25Retriever
+from langchain.retrievers import EnsembleRetriever,BM25Retriever
 
 # LangGraph 관련 임포트
 from langgraph.graph import StateGraph, START, END
@@ -25,9 +27,9 @@ from langchain_core.documents import Document
 
 load_dotenv()
 if not os.environ.get('OPENAI_API_KEY'):
-    raise ValueError('.env 확인하세요. key가 없습니다')
+    raise ValueError('OPENAI_API_KEY 없음. .env 확인하세요')
 if not os.environ.get('LANGSMITH_API_KEY'):
-    raise ValueError('LANGSMITH_API_KEY 없음. env 확인해주세요')
+    raise ValueError('LANGSMITH_API_KEY 없음. env 확인하세요')
 
 
 '''
@@ -159,35 +161,63 @@ def format_docs(docs):
 
 
 # 예시 질문으로 프롬포트 성능 테스트
-
+# 1. 무조건 대답해야만 하는거 , 애매한거, 대답 절대 못해야되는거
 query = [
     "강아지 파보바이러스 증상은 무엇인가요?",
     "자견 시기 예방접종 스케줄을 알려주세요",
-    "강아지 슬개골 탈구 치료 방법은 무엇인가요?",
+    # "강아지 슬개골 탈구 치료 방법은 무엇인가요?",
     "노령견이 신부전 진단을 받았는데, 식이관리와 약물치료를 병행해야 하나요?",
     "성견의 피부 알레르기와 외이염이 동시에 있을 때 치료 순서는 어떻게 되나요?",
-    "자견이 설사와 구토를 동시에 하는데 응급상황인지 알려주세요",
-    "10살 된 노령견이 갑자기 밥을 안 먹고 기력이 없는데, 어떤 질환을 의심해야 하나요?",
+    # "자견이 설사와 구토를 동시에 하는데 응급상황인지 알려주세요",
+    # "10살 된 노령견이 갑자기 밥을 안 먹고 기력이 없는데, 어떤 질환을 의심해야 하나요?",
     "중성화 수술 후 체중이 늘어난 성견의 적절한 운동량과 식이량은 어떻게 조절해야 하나요?",
     "강아지 암 예방을 위한 백신이 있나요?",
     "강아지가 초콜릿을 먹었을 때 어떤 약을 먹이면 되나요?"
 ]
 
-
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+#기본 리트리버 
+# retriever = vectorstore.as_retriever(search_kwargs={"k": 5}, search_type="similarity") #리트리버 변경 가능
+
+#리트리버 성능 test
 retriever = vectorstore.as_retriever(search_kwargs={"k": 5}, search_type="similarity") #리트리버 변경 가능
+# retriever_mmr = vectorstore.as_retriever(
+#     search_type="mmr",
+#     search_kwargs={
+#         "k": 5,              # 최종 반환 문서 수
+#         "fetch_k": 20,       # 초기 검색 문서 수 (많을수록 다양한 후보 확보)
+#         "lambda_mult": 0.7   # 0~1 사이 값 (1에 가까울수록 유사도 우선, 0에 가까울수록 다양성 우선)
+#     }
+# )
+# BM25 리트리버 생성 (벡터스토어에서 문서 추출 필요)
+bm25_docs = vectorstore.similarity_search("",k=1000)  # 모든 문서 로드
+retriever_bm25 = BM25Retriever.from_documents(bm25_docs) 
+# 앙상블 리트리버
+retriever_ensemble = EnsembleRetriever(
+    retrievers=[retriever, retriever_bm25],
+    weights=[0.5, 0.5]  # 가중치 합은 1이어야 합니다.
+) 
+retriever_dict = {
+    "유사도 검색(Similarity Search)": retriever,
+    # "MMR 검색(MMR Search)": retriever_mmr,
+    # "BM25 검색(BM25 Search)": retriever_bm25,
+    "앙상블 검색(Ensemble Search)": retriever_ensemble
+}
+
 
 rewrite_chain =  rewrite_prompt | llm | StrOutputParser()
 rag_chain = prompt | llm | StrOutputParser()
 
+for name, retriever in retriever_dict.items():
+    print(f"=== {name} 결과 ===")
 
+    for q in query:
+        docs = retriever.invoke(q)
+        context = format_docs(docs)
+        transformed = rewrite_chain.invoke({'question' : q}) #rewrite_chain의 출력(question 키워드)을 transformed에 저장
+        generation = rag_chain.invoke({"context": context, "question": transformed})
+        print("-"*30)
+        print(f'원본 query : {q}\n')
+        print(f'transformed query (핵심 키워드 추출) : {transformed}\n')
+        print(f"답변: {generation}\n")
 
-for q in query:
-    docs = retriever.invoke(q)
-    context = format_docs(docs)
-    transformed = rewrite_chain.invoke({'question' : q}) #rewrite_chain의 출력(question 키워드)을 transformed에 저장
-    generation = rag_chain.invoke({"context": context, "question": transformed})
-    print("="*30)
-    print(f'원본 query : {q}\n')
-    print(f'transformed query (핵심 키워드 추출) : {transformed}\n')
-    print(f"답변: {generation}\n")
