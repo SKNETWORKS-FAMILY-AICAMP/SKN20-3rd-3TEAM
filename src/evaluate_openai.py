@@ -9,6 +9,8 @@ from ragas import evaluate
 from ragas.metrics import (
     faithfulness,
     answer_relevancy,
+    context_recall,
+    context_precision,
 )
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from datasets import Dataset
@@ -174,21 +176,19 @@ def format_docs(docs):
 
 
 
-# 예시 질문으로 프롬포트 성능 테스트
-# 1. 무조건 대답해야만 하는거 , 애매한거, 대답 절대 못해야되는거
+# RAGAS 평가용 Ground Truth 데이터셋 로드
+import json
 
-query = [
-    "강아지 파보바이러스 증상은 무엇인가요?",
-    "자견 시기 예방접종 스케줄을 알려주세요",
-    "강아지 슬개골 탈구 치료 방법은 무엇인가요?",
-    "노령견이 신부전 진단을 받았는데, 식이관리와 약물치료를 병행해야 하나요?",  # 당연
-    "성견의 피부 알레르기와 외이염이 동시에 있을 때 치료 순서는 어떻게 되나요?",
-    "자견이 설사와 구토를 동시에 하는데 응급상황인지 알려주세요",
-    "10살 된 노령견이 갑자기 밥을 안 먹고 기력이 없는데, 어떤 질환을 의심해야 하나요?",
-    "중성화 수술 후 체중이 늘어난 성견의 적절한 운동량과 식이량은 어떻게 조절해야 하나요?",
-    "강아지 암 예방을 위한 백신이 있나요?", # 애매
-    "강아지가 초콜릿을 먹었을 때 어떤 약을 먹이면 되나요?"  # 절대
-]
+# JSON 파일에서 데이터셋 로드
+with open(r'..\data\ragas_ground_truth_dataset.json', 'r', encoding='utf-8') as f:
+    dataset_json = json.load(f)
+
+# 질문과 Ground Truth 추출
+query = [item['question'] for item in dataset_json['data']]
+ground_truths = [item['ground_truth'] for item in dataset_json['data']]
+
+print(f"✓ Ground Truth 데이터셋 로드 완료: {len(query)}개 Q&A 쌍 로드됨")
+print(f"  - 임상 분야: {', '.join(set([item['category'].split(' - ')[0] for item in dataset_json['data']]))}")
 
 
 llm = ChatOpenAI(model="gpt-4.1", temperature=0)
@@ -255,7 +255,7 @@ for name, temp_retriever in retriever_dict.items():
     contexts_list = []
     transformed_queries = []
     
-    for q in query:
+    for i, q in enumerate(query):
         docs = temp_retriever.invoke(q)
         context = format_docs(docs)
         
@@ -273,22 +273,27 @@ for name, temp_retriever in retriever_dict.items():
     print(f"\n=== {name} RAGAS 평가 시작 ===\n")
     
     # Dataset 생성 (RAGAS 형식에 맞춤)
+    # 4대 지표 계산을 위해 reference(ground truth) 추가
     dataset_dict = {
         "question": questions,
         "answer": answers,
         "contexts": contexts_list,
+        "ground_truth": ground_truths,  # context_recall, context_precision 계산에 필요
     }
     
     dataset = Dataset.from_dict(dataset_dict)
     
-    # RAGAS 평가 실행
-    # 참고: context_precision, context_recall, context_relevancy는 일부 버전에서 사용 불가
-    # reference(ground truth) 없이 사용 가능한 메트릭만 사용
-    # embeddings와 llm을 evaluate 함수에 직접 전달하여 호환성 문제 해결
+    # RAGAS 평가 실행 - 4대 지표 모두 포함
+    # context_recall: 검색된 컨텍스트가 ground truth를 얼마나 포함하는지
+    # context_precision: 검색된 컨텍스트가 얼마나 관련성이 있는지
+    # answer_relevancy: 답변이 질문과 관련이 있는지
+    # faithfulness: 답변이 컨텍스트에 기반하는지 (할루시네이션 방지)
     result = evaluate(
         dataset=dataset,
         metrics=[
-            faithfulness,        # 답변이 컨텍스트에 기반하는지 (할루시네이션 방지)
+            context_recall,      # 검색된 문서의 recall
+            context_precision,   # 검색된 문서의 precision
+            faithfulness,        # 답변이 컨텍스트에 기반하는지
             answer_relevancy,    # 답변이 질문과 관련이 있는지
         ],
         llm=llm,                # LLM을 evaluate 함수에 전달
@@ -304,14 +309,16 @@ for name, temp_retriever in retriever_dict.items():
     results_df['transformed_query'] = transformed_queries
     results_df['answer'] = answers
     
-    # 컬럼 순서 재정렬
+    # 컬럼 순서 재정렬 - RAGAS 4대 지표 포함
     column_order = [
         'retriever_name',
         'original_question',
         'transformed_query',
         'answer',
-        'faithfulness',
-        'answer_relevancy',
+        'context_recall',      # RAGAS 4대 지표 1
+        'context_precision',   # RAGAS 4대 지표 2
+        'faithfulness',        # RAGAS 4대 지표 3
+        'answer_relevancy',    # RAGAS 4대 지표 4
     ]
     
     # 존재하는 컬럼만 선택
@@ -337,10 +344,25 @@ if evaluation_results:
     )
     print(f"\n평가 결과가 '{csv_filename}' 파일에 저장되었습니다!")
     print(f"총 {len(final_results)}개의 질문이 평가되었습니다.")
-    print("\n평균 점수:")
-    metric_columns = ['faithfulness', 'answer_relevancy']
+    print("\n=== RAGAS 4대 지표 평균 점수 ===")
+    # RAGAS 4대 지표
+    metric_columns = [
+        'context_recall',
+        'context_precision', 
+        'faithfulness',
+        'answer_relevancy'
+    ]
+    
+    metric_descriptions = {
+        'context_recall': 'Context Recall (검색 재현율)',
+        'context_precision': 'Context Precision (검색 정확도)',
+        'faithfulness': 'Faithfulness (충실성)',
+        'answer_relevancy': 'Answer Relevancy (답변 관련성)'
+    }
+    
     for metric in metric_columns:
         if metric in final_results.columns:
-            print(f"  {metric}: {final_results[metric].mean():.4f}")
+            avg_score = final_results[metric].mean()
+            print(f"  {metric_descriptions[metric]}: {avg_score:.4f}")
 else:
     print("평가할 데이터가 없습니다.")
