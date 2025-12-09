@@ -99,7 +99,7 @@ prompt = ChatPromptTemplate.from_messages([
 - 집에서 가능한 안전한 관리 방법 2~3개 제안한다. 
   (문맥에 없다면 제안하지 않는다)
 - 언제 병원에 가야 하는지, 어떤 증상이 응급인지 문서 기반으로 설명한다.
-- 마지막 줄에 반드시 출처를 명시한다:
+- 마지막 줄에 반드시 대답 생성에 사용한 모든 문서의 출처를 명시한다:
   • 서적 출처: 책 제목 / 저자 / 출판사
   • QA 출처: 생애주기 / 과 / 질병
 
@@ -255,4 +255,4 @@ for name, retriever in retriever_dict.items():
         print(f'transformed query (핵심 키워드 추출) : {transformed}\n')
         print(f"답변: {generation}\n")
 
-# test
+# 
