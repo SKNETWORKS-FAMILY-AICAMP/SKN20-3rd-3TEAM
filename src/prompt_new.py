@@ -55,13 +55,13 @@ print("LangSmith 연결 완료")
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 #벡터스토어 로드
 vectorstore = Chroma(
-persist_directory=r".\ChromaDB", #DB 저장한 경로
+persist_directory=r".\data\ChromaDB_openai", #DB 저장한 경로
 collection_name="pet_health_qa_system",
 embedding_function=embeddings)
 print("벡터스토어가 성공적으로 로드되었습니다!")
 
 #컬렉션 확인
-client = chromadb.PersistentClient(path=r".\ChromaDB")
+client = chromadb.PersistentClient(path=r".\data\ChromaDB_openai")
 collections = client.list_collections()
 print("사용 가능한 컬렉션:", [c.name for c in collections])
 
