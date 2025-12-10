@@ -9,6 +9,8 @@ from ragas import evaluate
 from ragas.metrics import (
     faithfulness,
     answer_relevancy,
+    context_recall,
+    context_precision,
 )
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from datasets import Dataset
@@ -35,6 +37,9 @@ from langchain_core.documents import Document
 from langchain_community.retrievers import BM25Retriever
 from typing import List
 from ensemble import EnsembleRetriever
+
+# base_dir 정의 (파일 경로 설정)
+base_dir = os.path.dirname(os.path.abspath(__file__))
 
 load_dotenv()
 if not os.environ.get('OPENAI_API_KEY'):
@@ -67,15 +72,16 @@ embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 # RAGAS용 embeddings wrapper 생성
 ragas_embeddings = LangchainEmbeddingsWrapper(embeddings=embeddings)
 
-#벡터스토어 로드
+#벡터스토어 로드 (절대 경로 사용)
+chroma_path = os.path.join(base_dir, '..', 'data', 'ChromaDB_openai')
 vectorstore = Chroma(
-persist_directory=r"..\data\ChromaDB_openai", #DB 저장한 경로
+persist_directory=chroma_path,
 collection_name="pet_health_qa_system",
 embedding_function=embeddings)
 print("벡터스토어가 성공적으로 로드되었습니다!")
 
 #컬렉션 확인
-client = chromadb.PersistentClient(path=r"..\data\ChromaDB_openai")
+client = chromadb.PersistentClient(path=chroma_path)
 collections = client.list_collections()
 print("사용 가능한 컬렉션:", [c.name for c in collections])
 
@@ -174,21 +180,26 @@ def format_docs(docs):
 
 
 
-# 예시 질문으로 프롬포트 성능 테스트
-# 1. 무조건 대답해야만 하는거 , 애매한거, 대답 절대 못해야되는거
+# RAGAS 평가용 테스트 데이터셋 로드 (CSV 파일)
+import json
 
-query = [
-    "강아지 파보바이러스 증상은 무엇인가요?",
-    "자견 시기 예방접종 스케줄을 알려주세요",
-    "강아지 슬개골 탈구 치료 방법은 무엇인가요?",
-    "노령견이 신부전 진단을 받았는데, 식이관리와 약물치료를 병행해야 하나요?",  # 당연
-    "성견의 피부 알레르기와 외이염이 동시에 있을 때 치료 순서는 어떻게 되나요?",
-    "자견이 설사와 구토를 동시에 하는데 응급상황인지 알려주세요",
-    "10살 된 노령견이 갑자기 밥을 안 먹고 기력이 없는데, 어떤 질환을 의심해야 하나요?",
-    "중성화 수술 후 체중이 늘어난 성견의 적절한 운동량과 식이량은 어떻게 조절해야 하나요?",
-    "강아지 암 예방을 위한 백신이 있나요?", # 애매
-    "강아지가 초콜릿을 먹었을 때 어떤 약을 먹이면 되나요?"  # 절대
-]
+# CSV 파일에서 데이터셋 로드 (절대 경로 사용)
+csv_path = os.path.join(base_dir, '..', 'output', 'pet_test_dataset_openai.csv')
+dataset_df = pd.read_csv(csv_path)
+
+# 질문과 답변(reference) 추출
+query = dataset_df['user_input'].tolist()
+ground_truths = dataset_df['reference'].tolist()
+
+print(f"✓ 테스트 데이터셋 로드 완료: {len(query)}개 Q&A 쌍 로드됨")
+print(f"  - 사용 데이터: pet_test_dataset_openai.csv")
+
+# 디버깅: ground_truths 확인
+print(f"\n[디버깅 정보]")
+print(f"  - 질문 수: {len(query)}")
+print(f"  - Ground Truth 수: {len(ground_truths)}")
+print(f"  - 첫 번째 질문: {query[0][:50]}...")
+print(f"  - 첫 번째 Ground Truth: {ground_truths[0][:50] if ground_truths[0] else 'None'}...")
 
 
 llm = ChatOpenAI(model="gpt-4.1", temperature=0)
@@ -245,17 +256,22 @@ rag_chain = prompt | llm | StrOutputParser()
 
 
 
-# RAGAS 평가를 위한 데이터 수집
+# RAGAS 평가를 위한 데이터 수집 (배치 처리 방식)
 evaluation_results = []
 
+# 배치 크기 설정 (타임아웃 방지)
+BATCH_SIZE = 5  # 한 번에 5개씩 평가 (필요시 조정: 2-10 범위 권장)
+
 for name, temp_retriever in retriever_dict.items():
+    print(f"\n=== {name} RAGAS 평가 시작 ===\n")
+    
     # 평가를 위한 데이터 준비
     questions = []
     answers = []
     contexts_list = []
     transformed_queries = []
     
-    for q in query:
+    for i, q in enumerate(query):
         docs = temp_retriever.invoke(q)
         context = format_docs(docs)
         
@@ -269,64 +285,89 @@ for name, temp_retriever in retriever_dict.items():
         contexts_list.append([doc.page_content for doc in docs])
         transformed_queries.append(transformed)
     
-    # RAGAS 평가 수행
-    print(f"\n=== {name} RAGAS 평가 시작 ===\n")
+    # 배치 단위로 평가 수행
+    batch_results = []
+    total_batches = (len(questions) - 1) // BATCH_SIZE + 1
     
-    # Dataset 생성 (RAGAS 형식에 맞춤)
-    dataset_dict = {
-        "question": questions,
-        "answer": answers,
-        "contexts": contexts_list,
-    }
+    for batch_idx in range(0, len(questions), BATCH_SIZE):
+        batch_end = min(batch_idx + BATCH_SIZE, len(questions))
+        batch_num = batch_idx // BATCH_SIZE + 1
+        
+        print(f"  [{batch_num}/{total_batches}] 배치 평가 중... (질문 {batch_idx+1}-{batch_end})")
+        
+        # 배치 데이터 준비
+        batch_dataset_dict = {
+            "user_input": questions[batch_idx:batch_end],
+            "response": answers[batch_idx:batch_end],
+            "retrieved_contexts": contexts_list[batch_idx:batch_end],
+            "reference": ground_truths[batch_idx:batch_end],
+        }
+        
+        batch_dataset = Dataset.from_dict(batch_dataset_dict)
+        
+        try:
+            # RAGAS 평가 실행 - 4대 지표 모두 포함
+            # context_recall: 검색된 컨텍스트가 ground truth를 얼마나 포함하는지
+            # context_precision: 검색된 컨텍스트가 얼마나 관련성이 있는지
+            # answer_relevancy: 답변이 질문과 관련이 있는지
+            # faithfulness: 답변이 컨텍스트에 기반하는지 (할루시네이션 방지)
+            result = evaluate(
+                dataset=batch_dataset,
+                metrics=[
+                    context_recall,      # 검색된 문서의 recall
+                    context_precision,   # 검색된 문서의 precision
+                    faithfulness,        # 답변이 컨텍스트에 기반하는지
+                    answer_relevancy,    # 답변이 질문과 관련이 있는지
+                ],
+                llm=llm,                # LLM을 evaluate 함수에 전달
+                embeddings=ragas_embeddings,  # Embeddings를 evaluate 함수에 전달
+            )
+            
+            # 결과를 DataFrame으로 변환
+            batch_results_df = result.to_pandas()
+            batch_results.append(batch_results_df)
+            print(f"  ✓ 배치 {batch_num} 완료")
+            
+        except Exception as e:
+            print(f"  ⚠️  배치 {batch_num} 평가 중 오류 발생: {str(e)}")
+            continue
     
-    dataset = Dataset.from_dict(dataset_dict)
-    
-    # RAGAS 평가 실행
-    # 참고: context_precision, context_recall, context_relevancy는 일부 버전에서 사용 불가
-    # reference(ground truth) 없이 사용 가능한 메트릭만 사용
-    # embeddings와 llm을 evaluate 함수에 직접 전달하여 호환성 문제 해결
-    result = evaluate(
-        dataset=dataset,
-        metrics=[
-            faithfulness,        # 답변이 컨텍스트에 기반하는지 (할루시네이션 방지)
-            answer_relevancy,    # 답변이 질문과 관련이 있는지
-        ],
-        llm=llm,                # LLM을 evaluate 함수에 전달
-        embeddings=ragas_embeddings,  # Embeddings를 evaluate 함수에 전달
-    )
-    
-    # 결과를 DataFrame으로 변환
-    results_df = result.to_pandas()
-    
-    # 추가 정보 추가
-    results_df['retriever_name'] = name
-    results_df['original_question'] = questions
-    results_df['transformed_query'] = transformed_queries
-    results_df['answer'] = answers
-    
-    # 컬럼 순서 재정렬
-    column_order = [
-        'retriever_name',
-        'original_question',
-        'transformed_query',
-        'answer',
-        'faithfulness',
-        'answer_relevancy',
-    ]
-    
-    # 존재하는 컬럼만 선택
-    available_columns = [col for col in column_order if col in results_df.columns]
-    results_df = results_df[available_columns]
-    
-    evaluation_results.append(results_df)
+    # 모든 배치 결과 합치기
+    if batch_results:
+        results_df = pd.concat(batch_results, ignore_index=True)
+        
+        # 추가 정보 추가
+        results_df['retriever_name'] = name
+        results_df['original_question'] = questions
+        results_df['transformed_query'] = transformed_queries
+        results_df['answer'] = answers
+        
+        # 컬럼 순서 재정렬 - RAGAS 4대 지표 포함
+        column_order = [
+            'retriever_name',
+            'original_question',
+            'transformed_query',
+            'answer',
+            'context_recall',      # RAGAS 4대 지표 1
+            'context_precision',   # RAGAS 4대 지표 2
+            'faithfulness',        # RAGAS 4대 지표 3
+            'answer_relevancy',    # RAGAS 4대 지표 4
+        ]
+        
+        # 존재하는 컬럼만 선택
+        available_columns = [col for col in column_order if col in results_df.columns]
+        results_df = results_df[available_columns]
+        
+        evaluation_results.append(results_df)
+        print(f"✓ {name} 평가 완료")
 
 # 모든 결과를 하나의 DataFrame으로 합치기
 if evaluation_results:
     final_results = pd.concat(evaluation_results, ignore_index=True)
     
-    # CSV 파일로 저장
+    # CSV 파일로 저장 (절대 경로 사용)
     # Excel 호환성을 위해 quoting과 escapechar 설정
-    csv_filename = r"..\output\ragas_evaluation_results_openai.csv"
+    csv_filename = os.path.join(base_dir, '..', 'output', 'ragas_evaluation_results_openai.csv')
     final_results.to_csv(
         csv_filename, 
         index=False, 
@@ -337,10 +378,25 @@ if evaluation_results:
     )
     print(f"\n평가 결과가 '{csv_filename}' 파일에 저장되었습니다!")
     print(f"총 {len(final_results)}개의 질문이 평가되었습니다.")
-    print("\n평균 점수:")
-    metric_columns = ['faithfulness', 'answer_relevancy']
+    print("\n=== RAGAS 4대 지표 평균 점수 ===")
+    # RAGAS 4대 지표
+    metric_columns = [
+        'context_recall',
+        'context_precision', 
+        'faithfulness',
+        'answer_relevancy'
+    ]
+    
+    metric_descriptions = {
+        'context_recall': 'Context Recall (검색 재현율)',
+        'context_precision': 'Context Precision (검색 정확도)',
+        'faithfulness': 'Faithfulness (충실성)',
+        'answer_relevancy': 'Answer Relevancy (답변 관련성)'
+    }
+    
     for metric in metric_columns:
         if metric in final_results.columns:
-            print(f"  {metric}: {final_results[metric].mean():.4f}")
+            avg_score = final_results[metric].mean()
+            print(f"  {metric_descriptions[metric]}: {avg_score:.4f}")
 else:
     print("평가할 데이터가 없습니다.")
