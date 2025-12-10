@@ -8,3 +8,5 @@ __pycache__/
 *$py.class
 *.so
 .Python
+1.데이터/
+chroma_db/
