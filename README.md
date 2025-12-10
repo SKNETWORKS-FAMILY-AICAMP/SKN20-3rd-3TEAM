@@ -2,35 +2,32 @@
 
 **강아지 질병 증상 상담 챗봇**
 
-## 👥 팀원 소개
-
+👥 팀원 소개
 <div align="center">
-
 <table>
   <tr>
     <td align="center" width="150">
-      <img src="./images/totoro.png" width="120" height="120">
+      <img src="https://github.com/user-attachments/assets/85e707e3-380e-4b47-a530-cc593bcd4f87" width="120" height="120" style="object-fit: cover;">
       <br><b>박찬</b><br>팀장
     </td>
     <td align="center" width="150">
-      <img src="./images/gon.png" width="120" height="120">
+      <img src="https://github.com/user-attachments/assets/40307edb-2139-4c87-923a-a18ce394f5b0" width="120" height="120" style="object-fit: cover;">
       <br><b>김나현</b><br>팀원
     </td>
     <td align="center" width="150">
-      <img src="./images/patrick.png" width="120" height="120">
+      <img src="https://github.com/user-attachments/assets/806b67c5-b5a0-4605-868b-bf52895bc006" width="120" height="120" style="object-fit: cover;">
       <br><b>이도경</b><br>팀원
     </td>
     <td align="center" width="150">
-      <img src="./images/maenggu.png" width="120" height="120">
+      <img src="https://github.com/user-attachments/assets/5c1c0ded-8509-412e-9d51-46d8bd9e7c11" width="120" height="120" style="object-fit: cover;">
       <br><b>안채연</b><br>팀원
     </td>
     <td align="center" width="150">
-      <img src="./images/dipsy.png" width="120" height="120">
+      <img src="https://github.com/user-attachments/assets/334057f7-b2a3-4fac-919c-d78ade2be0fe" width="120" height="120" style="object-fit: cover;">
       <br><b>이경현</b><br>팀원
     </td>
   </tr>
 </table>
-
 </div>
 
 ## 📌 프로젝트 개요
