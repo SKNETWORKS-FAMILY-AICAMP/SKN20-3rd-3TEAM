@@ -5,12 +5,13 @@ warnings.filterwarnings("ignore")
 import streamlit as st
 from dotenv import load_dotenv
 
-# prompt_new.py에서 필요한 함수들 import
-from prompt_new import (
+# prompt_module.py에서 필요한 함수들 import
+from prompt_module import (
     initialize_rag_system,
     get_rag_prompt,
     get_rewrite_prompt,
-    format_docs
+    format_docs,
+    self_check_retriver
 )
 
 from langchain_core.output_parsers import StrOutputParser
@@ -126,9 +127,11 @@ def show_chat():
     """채팅 스타일의 Q&A 인터페이스"""
     st.markdown("""
     <div style="text-align: center; margin-bottom: 10px;">
-        <h1 style="font-size: 60px; font-weight: 900; color: #1e40af; margin: 0; line-height: 1.2;">
-            반려견 건강 상담 ChatBot
-        </h1>
+        <div style="display: flex; align-items: center; justify-content: center; gap: 15px;">
+            <h1 style="font-size: 60px; font-weight: 900; color: #1e40af; margin: 0; line-height: 1.2;">
+                반려견 건강 상담 ChatBot
+            </h1>
+        </div>
         <p style="font-size: 14px; color: #666; margin: 8px 0 0 0;">
             궁금한 반려견 건강 증상에 대해 물어보세요. 신뢰할 수 있는 의료 자료를 바탕으로 정확한 답변을 드립니다.
         </p>
@@ -137,7 +140,7 @@ def show_chat():
     
     # 2열 레이아웃: 왼쪽(문서) - 오른쪽(채팅)
     col_docs, col_chat = st.columns([1, 2], gap="large")
-    
+    st.markdown(" ")
     with col_chat:
         st.markdown("### 💬 대화")
         
@@ -196,6 +199,9 @@ def show_chat():
                     
                     # 1. 벡터스토어에서 문서 검색
                     docs = st.session_state.retriever.invoke(q)
+                    
+                    # 1-1. self_check_retriver로 문서 검증 (질문과 관련 있는 문서만 필터링)
+                    docs = self_check_retriver(docs, q, st.session_state.llm)
                     
                     if not docs:
                         ai_response = "죄송합니다. 관련된 정보를 찾을 수 없습니다. 더 구체적으로 설명해주시겠어요?"

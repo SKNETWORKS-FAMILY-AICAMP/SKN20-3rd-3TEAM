@@ -24,7 +24,7 @@ if not os.environ.get('LANGSMITH_API_KEY'):
 os.environ["LANGSMITH_TRACING_V2"] = "true"
 os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGSMITH_PROJECT"] = "pet_rag"
-# print("LangSmith 연결 완료")
+print("LangSmith 연결 완료")
 
 
 # ---------------------------
@@ -46,10 +46,14 @@ def initialize_rag_system(vectorstore_path=r"..\data\ChromaDB_bge_m3", collectio
         collection_name=collection_name,
         embedding_function=embeddings
     )
-    # print("벡터스토어가 성공적으로 로드되었습니다!")  # 컬렉션 확인
+    print("벡터스토어가 성공적으로 로드되었습니다!")
+    
+    # 컬렉션 확인
     client = chromadb.PersistentClient(path=vectorstore_path)
     collections = client.list_collections()
-    # print("사용 가능한 컬렉션:", [c.name for c in collections])  # LLM 초기화
+    print("사용 가능한 컬렉션:", [c.name for c in collections])
+    
+    # LLM 초기화
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     
     # Retriever 생성 (유사도 + BM25 앙상블)
@@ -272,10 +276,14 @@ vectorstore = Chroma(
 persist_directory=r"..\data\ChromaDB_bge_m3", #DB 저장한 경로
 collection_name="pet_health_qa_system_bge_m3",
 embedding_function=embeddings)
-    # print("벡터스토어가 성공적으로 로드되었습니다!")#컬렉션 확인
+print("벡터스토어가 성공적으로 로드되었습니다!")
+
+#컬렉션 확인
 client = chromadb.PersistentClient(path=r"..\data\ChromaDB_bge_m3")
 collections = client.list_collections()
-    # print("사용 가능한 컬렉션:", [c.name for c in collections])
+print("사용 가능한 컬렉션:", [c.name for c in collections])
+
+
 #프롬포트 템플릿 생성
 prompt = ChatPromptTemplate.from_messages([
         ("system", """
@@ -440,21 +448,20 @@ retriever_dict = {
 }
 
 
-if __name__ == "__main__":
-    rewrite_chain =  rewrite_prompt | llm | StrOutputParser()
-    rag_chain = prompt | llm | StrOutputParser()
+rewrite_chain =  rewrite_prompt | llm | StrOutputParser()
+rag_chain = prompt | llm | StrOutputParser()
 
-    for name, retriever in retriever_dict.items():
-        print(f"=== {name} 결과 ===")
+for name, retriever in retriever_dict.items():
+    print(f"=== {name} 결과 ===")
 
-        for q in query:
-            docs = retriever.invoke(q)
-            context = format_docs(docs)
-            transformed = rewrite_chain.invoke({'question' : q}) #rewrite_chain의 출력(question 키워드)을 transformed에 저장
-            generation = rag_chain.invoke({"context": context, "question": transformed})
-            print("-"*30)
-            print(f'원본 query : {q}\n')
-            print(f'transformed query (핵심 키워드 추출) : {transformed}\n')
-            print(f"답변: {generation}\n")
+    for q in query:
+        docs = retriever.invoke(q)
+        context = format_docs(docs)
+        transformed = rewrite_chain.invoke({'question' : q}) #rewrite_chain의 출력(question 키워드)을 transformed에 저장
+        generation = rag_chain.invoke({"context": context, "question": transformed})
+        print("-"*30)
+        print(f'원본 query : {q}\n')
+        print(f'transformed query (핵심 키워드 추출) : {transformed}\n')
+        print(f"답변: {generation}\n")
 
 # 
