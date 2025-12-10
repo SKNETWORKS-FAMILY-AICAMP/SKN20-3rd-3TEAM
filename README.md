@@ -49,7 +49,7 @@
 
 ### **주요 특징**
 - 📚 **30,000+ 건의 수의학 데이터** 기반 정확한 답변
-- 🔍 **하이브리드 검색 시스템** (Similarity + MMR + BM25 + Ensemble)
+- 🔍 **하이브리드 검색 시스템** (Similarity + BM25 + Ensemble(Simlilarity + BM25))
 - 🎯 **RAGAS 기반 성능 평가** (4가지 메트릭으로 객관적 품질 측정)
 - 💬 **Streamlit 기반 직관적인 UI**
 - 🤖 **다중 임베딩 모델 비교** (OpenAI vs BGE-M3)
@@ -85,15 +85,11 @@
 1. Similarity Search (유사도 검색)
    └─ 벡터 유사도 기반 의미론적 검색
 
-2. MMR Search (다양성 검색)
-   └─ Maximal Marginal Relevance
-   └─ 유사도 + 다양성 동시 고려
-
-3. BM25 Search (키워드 검색)
+2. BM25 Search (키워드 검색)
    └─ 전통적인 키워드 매칭 기반
    └─ TF-IDF 개선 알고리즘
 
-4. Ensemble Search (앙상블)
+3. Ensemble Search (앙상블)
    └─ Similarity + BM25 결합
    └─ 가중치 기반 종합 검색 (0.5:0.5)
 ```
@@ -138,51 +134,51 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        사용자 인터페이스                         │
-│                      (Streamlit UI)                           │
+│                       사용자 인터페이스                        │
+│                        (Streamlit UI)                        │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      질의 응답 시스템                            │
+│                      질의 응답 시스템                         │
 ├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐      ┌──────────────┐      ┌───────────┐ │
-│  │  Query       │─────▶│  Retriever   │─────▶│   LLM     │ │
-│  │  Rewriting   │      │  (4 Types)   │      │ (GPT-4.1) │ │
-│  └──────────────┘      └──────────────┘      └───────────┘ │
-│         │                     │                      │      │
-│         ▼                     ▼                      ▼      │
-│  ┌──────────────┐      ┌──────────────┐      ┌───────────┐ │
-│  │  Keyword     │      │  Similarity  │      │  Prompt   │ │
-│  │  Extraction  │      │  MMR         │      │  Template │ │
-│  └──────────────┘      │  BM25        │      └───────────┘ │
-│                        │  Ensemble    │                     │
-│                        └──────────────┘                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────┐         │
+│  │    Query     │─▶│  Retriever   │─▶│    LLM    │         │
+│  │  Rewriting   │  │              │  │ (GPT-4o   │         │
+│  │              │  │              │  │  -mini)   │         │
+│  └──────────────┘  └──────────────┘  └───────────┘         │
+│         │                 │                 │               │
+│         ▼                 ▼                 ▼               │
+│  ┌──────────────┐  ┌──────────────┐  ┌───────────┐         │
+│  │   Keyword    │  │ Similarity   │  │  Prompt   │         │
+│  │  Extraction  │  │     BM25     │  │ Template  │         │
+│  └──────────────┘  │  Ensemble    │  └───────────┘         │
+│                    └──────────────┘                         │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      데이터 레이어                              │
+│                       데이터 레이어                           │
 ├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────────┐          ┌──────────────────┐        │
-│  │  ChromaDB        │          │  ChromaDB        │        │
-│  │  (OpenAI)        │          │  (BGE-M3)        │        │
-│  │  30,000+ docs    │          │  30,000+ docs    │        │
-│  └──────────────────┘          └──────────────────┘        │
-│                                                             │
-│  - 수의학 서적 데이터 (5개 과)                                  │
-│  - 질의응답 데이터 (5개 과)                                    │
+│  ┌──────────────────┐  ┌──────────────────┐                │
+│  │    ChromaDB      │  │    ChromaDB      │                │
+│  │    (OpenAI)      │  │    (BGE-M3)      │                │
+│  │  30,000+ docs    │  │  30,000+ docs    │                │
+│  └──────────────────┘  └──────────────────┘                │
+│                                                              │
+│          - 수의학 서적 데이터 (5개 과)                        │
+│          - 질의응답 데이터 (5개 과)                           │
 └─────────────────────────────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      평가 시스템                               │
+│                       평가 시스템                             │
 ├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────────┐          ┌──────────────────┐        │
-│  │  RAGAS           │          │  Test Dataset    │        │
-│  │  Evaluation      │◄─────────│  Generation      │        │
-│  │  (4 Metrics)     │          │  (Synthetic)     │        │
-│  └──────────────────┘          └──────────────────┘        │
+│  ┌──────────────────┐  ┌──────────────────┐                │
+│  │      RAGAS       │  │  Test Dataset    │                │
+│  │   Evaluation     │◄─│   Generation     │                │
+│  │   (4 Metrics)    │  │   (Synthetic)    │                │
+│  └──────────────────┘  └──────────────────┘                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -196,7 +192,7 @@
 - 메타데이터 구조화 (출처, 진료과, 생애주기 등)
 
 #### 2. **벡터스토어 구축**
-- **OpenAI 벡터스토어** (`vectorstore_openai.py`)
+- **OpenAI 벡터스토어** (`vectorstore_openai.py` - 별도 파일)
   - 임베딩: `text-embedding-3-small`
   - 컬렉션: `pet_health_qa_system`
   - 경로: `../data/ChromaDB_openai`
@@ -207,25 +203,48 @@
   - 경로: `../data/ChromaDB_bge_m3`
 
 - 배치 처리 (100개씩)로 대용량 데이터 효율적 임베딩
-- API Rate Limit 방지 메커니즘
+- API Rate Limit 방지 메커니즘 (time.sleep 포함)
 
 #### 3. **Retriever 시스템** (`ensemble.py`)
 ```python
 class EnsembleRetriever:
-    """여러 retriever의 결과를 가중치 기반으로 결합"""
+    """여러 retriever의 결과를 가중치 기반으로 결합하는 앙상블 리트리버"""
     
-    def __init__(self, retrievers, weights):
+    def __init__(self, retrievers: List, weights: List[float]):
         self.retrievers = retrievers  # [vector_retriever, bm25_retriever]
         self.weights = weights         # [0.5, 0.5]
     
-    def invoke(self, query):
-        # 각 retriever에서 문서 검색
-        # 가중치 기반 스코어 계산
-        # 최종 순위 결정
-        return sorted_documents
+    def invoke(self, query: str) -> List[Document]:
+        """여러 retriever의 결과를 가중치 기반으로 결합"""
+        all_docs = []
+        doc_scores = {}
+        
+        for retriever, weight in zip(self.retrievers, self.weights):
+            docs = retriever.invoke(query)
+            
+            # 각 문서에 가중치 적용 (순위 기반 스코어)
+            for i, doc in enumerate(docs):
+                doc_id = hash(doc.page_content)
+                score = weight * (len(docs) - i) / len(docs)
+                
+                if doc_id in doc_scores:
+                    doc_scores[doc_id]['score'] += score
+                else:
+                    doc_scores[doc_id] = {'doc': doc, 'score': score}
+        
+        # 스코어 기준으로 정렬
+        sorted_docs = sorted(doc_scores.values(), key=lambda x: x['score'], reverse=True)
+        return [item['doc'] for item in sorted_docs]
 ```
 
-#### 4. **프롬프트 엔지니어링** (`prompt_new.py`)
+#### 4. **프롬프트 엔지니어링 및 RAG 시스템** (`prompt_module.py`)
+- **핵심 함수들**:
+  - `initialize_rag_system()`: RAG 시스템 초기화 (벡터스토어, LLM, retriever 로드)
+  - `get_rag_prompt()`: RAG 답변 생성용 프롬프트 템플릿
+  - `get_rewrite_prompt()`: 질문 변환용 프롬프트 템플릿
+  - `format_docs()`: 검색된 문서를 XML 형식으로 포맷팅
+  - `filter_docs_by_response()`: 답변에 실제로 사용된 문서만 필터링
+
 - **할루시네이션 방지 규칙** 명시
   - 문맥에 없는 정보는 절대 사용 금지
   - 관련 정보 없을 시 명확히 안내
@@ -240,16 +259,16 @@ class EnsembleRetriever:
   - 출처: (서적/상담기록 상세 정보)
   ```
 
-#### 5. **테스트 데이터 생성** (`make_testset.py`)
+#### 5. **테스트 데이터 생성** (`make_testset.py` - 별도 파일)
 ```python
 # 벡터스토어에서 context 추출 → LLM으로 질문-답변 생성
 1. 벡터스토어에서 10개 context 랜덤 추출 (최소 200자)
-2. GPT-4.1로 각 context 기반 Q&A 생성
+2. GPT-4o-mini로 각 context 기반 Q&A 생성
 3. CSV 형식으로 저장 (user_input, reference)
 ```
 
 #### 6. **RAGAS 평가 시스템** 
-- **OpenAI 평가** (`evaluate_openai.py`)
+- **OpenAI 평가** (`evaluate_openai.py` - 별도 파일)
   - OpenAI 벡터스토어 사용
   - 4가지 검색 방식 비교
   - RAGAS 4대 메트릭 측정
@@ -260,7 +279,7 @@ class EnsembleRetriever:
   - 동일한 평가 파이프라인
   - 결과 저장: `ragas_evaluation_results_bge_m3.csv`
 
-#### 7. **합성 데이터 생성** (`ragas_synthetic_dataset.py`)
+#### 7. **합성 데이터 생성** (`ragas_synthetic_dataset.py` - 별도 파일)
 ```python
 # RAGAS TestsetGenerator 사용
 distributions = {
@@ -301,22 +320,23 @@ testset = generator.generate_with_langchain_docs(
    ↓
 5. Query Rewriting (키워드 추출)
    ↓
-6. 하이브리드 검색 (4가지 방식)
-   ├─ Similarity Search
-   ├─ MMR Search
+6. 하이브리드 검색 
+   ├─ Similarity Search   
    ├─ BM25 Search
    └─ Ensemble Search
    ↓
 7. 문서 포맷팅 (출처 정보 포함)
    ↓
-8. LLM 답변 생성 (GPT-4.1)
+8. LLM 답변 생성 (GPT-4o-mini)
    ├─ 상태 요약
    ├─ 가능한 원인
    ├─ 집에서 관리 방법
    ├─ 병원 방문 시기
    └─ 출처 명시
    ↓
-9. 결과 출력 (Streamlit UI)
+9. 답변에 사용된 문서만 필터링 (filter_docs_by_response)
+   ↓
+10. 결과 출력 (Streamlit UI)
 ```
 
 ### **검색 흐름 상세**
@@ -329,12 +349,12 @@ testset = generator.generate_with_langchain_docs(
                          ↓
             [Parallel Retrieval - 4가지 방식]
                          ↓
-    ┌───────────┬──────────┬──────────┬
-    │           │          │          │
-Similarity    MMR      BM25    Ensemble
-  Search     Search    Search   Search
-    │           │          │          │
-    └───────────┴──────────┴──────────┘
+             ┌───────────┬──────────┬
+             │           │          │
+          Similarity    BM25    Ensemble
+            Search     Search   Search
+             │           │          │
+             └───────────┴──────────┴
                          ↓
             [Document Formatting]
 <document>
@@ -343,12 +363,15 @@ Similarity    MMR      BM25    Ensemble
   <data_type>medical_data</data_type>
 </document>
                          ↓
-            [LLM Generation (GPT-4.1)]
+            [LLM Generation (GPT-4o-mini)]
 - 상태 요약: 강아지가 구토 증상을 보이고 있습니다...
 - 가능한 원인: 급성 위장염, 이물질 섭취...
 - 집에서 관리: 12시간 금식, 소량 물 공급...
 - 병원 방문: 24시간 이상 지속 시 즉시 내원...
 - 출처: 소동물 내과학 / 상담기록-성견/내과/위장염
+                         ↓
+            [Filter Used Documents]
+답변에 실제로 사용된 문서만 추출하여 UI에 표시
 ```
 
 ---
@@ -358,7 +381,7 @@ Similarity    MMR      BM25    Ensemble
 ```
 project_root/
 │
-├── data/                                    # 원천 데이터
+├── data/                                    # 원천 데이터 (상위 디렉토리)
 │   ├── 말뭉치/                               # 수의학 서적 데이터
 │   │   ├── TS_말뭉치데이터_내과/
 │   │   ├── TS_말뭉치데이터_안과/
@@ -381,14 +404,14 @@ project_root/
 │   │
 │   └── chunked_docs.pkl                     # 청킹된 문서 (중간 결과)
 │
-├── output/                                   # 평가 결과 및 테스트셋
+├── output/                                   # 평가 결과 및 테스트셋 (상위 디렉토리)
 │   ├── pet_test_dataset_openai.csv          # OpenAI 테스트 데이터
 │   ├── pet_test_dataset_bge_m3.csv          # BGE-M3 테스트 데이터
 │   ├── ragas_evaluation_results_openai.csv  # OpenAI 평가 결과
 │   ├── ragas_evaluation_results_bge_m3.csv  # BGE-M3 평가 결과
 │   └── ragas_synthetic_dataset.csv          # 합성 테스트 데이터
 │
-├── scripts/                                  # 실행 스크립트
+├── scripts/                                  # 실행 스크립트 (현재 디렉토리)
 │   ├── preprocessing.py                     # 1단계: 데이터 전처리
 │   ├── vectorstore_openai.py                # 2단계: OpenAI 벡터스토어 구축
 │   ├── vectorstore_bge_m3.py                # 2단계: BGE-M3 벡터스토어 구축
@@ -396,8 +419,9 @@ project_root/
 │   ├── evaluate_openai.py                   # 4단계: OpenAI 성능 평가
 │   ├── evaluate_bge_m3.py                   # 4단계: BGE-M3 성능 평가
 │   ├── ragas_synthetic_dataset.py           # 5단계: 합성 데이터 생성
-│   ├── prompt_new.py                        # 질의응답 테스트
-│   └── ensemble.py                          # Ensemble Retriever 클래스
+│   ├── prompt_module.py                     # RAG 시스템 핵심 모듈
+│   ├── ensemble.py                          # Ensemble Retriever 클래스
+│   └── streamlit_app.py                     # Streamlit UI 앱
 │
 ├── requirements.txt                          # 의존성 패키지
 ├── .env                                      # 환경 변수 (API Keys)
@@ -409,33 +433,33 @@ project_root/
 
 ```bash
 # 1단계: 데이터 전처리 (필수)
-python scripts/preprocessing.py
-# → data/chunked_docs.pkl 생성
+python preprocessing.py
+# → ../data/chunked_docs.pkl 생성
 
 # 2단계: 벡터스토어 구축 (둘 중 하나 또는 둘 다)
-python scripts/vectorstore_openai.py
-# → data/ChromaDB_openai/ 생성
+python vectorstore_openai.py
+# → ../data/ChromaDB_openai/ 생성
 
-python scripts/vectorstore_bge_m3.py
-# → data/ChromaDB_bge_m3/ 생성
+python vectorstore_bge_m3.py
+# → ../data/ChromaDB_bge_m3/ 생성
 
 # 3단계: 테스트 데이터셋 생성
-python scripts/make_testset.py
-# → output/pet_test_dataset_*.csv 생성
+python make_testset.py
+# → ../output/pet_test_dataset_*.csv 생성
 
 # 4단계: 성능 평가 (RAGAS)
-python scripts/evaluate_openai.py
-# → output/ragas_evaluation_results_openai.csv 생성
+python evaluate_openai.py
+# → ../output/ragas_evaluation_results_openai.csv 생성
 
-python scripts/evaluate_bge_m3.py
-# → output/ragas_evaluation_results_bge_m3.csv 생성
+python evaluate_bge_m3.py
+# → ../output/ragas_evaluation_results_bge_m3.csv 생성
 
 # 5단계 (선택): 합성 데이터 생성
-python scripts/ragas_synthetic_dataset.py
-# → output/ragas_synthetic_dataset.csv 생성
+python ragas_synthetic_dataset.py
+# → ../output/ragas_synthetic_dataset.csv 생성
 
-# 6단계: 질의응답 테스트
-python scripts/prompt_new.py
+# 6단계: Streamlit UI 실행
+streamlit run streamlit_app.py
 ```
 
 ---
@@ -495,20 +519,48 @@ python scripts/prompt_new.py
 
 #### **Step 2: Query Rewriting**
 ```python
-rewrite_prompt = PromptTemplate("""
-    다음 질문을 검색에 더 적합한 형태로 변환해 주세요.
-    키워드 중심으로 명확하게 바꿔주세요
-    변환된 검색어만 출력하세요
-
-    원본 질문: {question}
-    변환된 검색어:
-""")
+# prompt_module.py의 get_rewrite_prompt() 사용
+rewrite_prompt = ChatPromptTemplate.from_messages([
+    ("system", """당신은 검색 쿼리 변환 전문가입니다.
+    사용자의 질문을 검색에 최적화된 키워드로 변환해주세요.
+    - 핵심 키워드만 추출
+    - 불필요한 조사, 부사 제거
+    - 의학 용어로 변환
+    변환된 검색어만 출력하세요."""),
+    ("human", "질문: {question}")
+])
 ```
 ```
 변환된 검색어: "강아지 구토 식욕부진 기력저하"
 ```
 
 #### **Step 3: 하이브리드 검색**
+
+**Retriever 초기화 (prompt_module.py의 initialize_rag_system())**
+```python
+def initialize_rag_system(vectorstore_path, collection_name):
+    # 벡터스토어 로드
+    vectorstore = Chroma(
+        persist_directory=vectorstore_path,
+        collection_name=collection_name,
+        embedding_function=embedding_model
+    )
+    
+    # Similarity Retriever
+    retriever = vectorstore.as_retriever(
+        search_kwargs={"k": 5}, 
+        search_type="similarity"
+    )
+    
+    # LLM 초기화
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    
+    return {
+        'vectorstore': vectorstore,
+        'retriever': retriever,
+        'llm': llm
+    }
+```
 
 **방법 1 - Similarity Search**
 ```python
@@ -518,38 +570,30 @@ retriever = vectorstore.as_retriever(
 )
 ```
 
-**방법 2 - MMR Search**
-```python
-retriever_mmr = vectorstore.as_retriever(
-    search_type="mmr",
-    search_kwargs={
-        "k": 5,              # 최종 반환 문서 수
-        "fetch_k": 20,       # 초기 검색 문서 수
-        "lambda_mult": 0.7   # 유사도:다양성 비율
-    }
-)
-```
-
-**방법 3 - BM25 Search**
+**방법 2 - BM25 Search**
 ```python
 # ChromaDB에서 모든 문서 로드
 all_docs = vectorstore._collection.get(limit=doc_count)
 
 # BM25 Retriever 생성
+from langchain_community.retrievers import BM25Retriever
 retriever_bm25 = BM25Retriever.from_documents(bm25_docs)
 ```
 
-**방법 4 - Ensemble Search**
+**방법 3 - Ensemble Search**
 ```python
+from ensemble import EnsembleRetriever
+
 retriever_ensemble = EnsembleRetriever(
     retrievers=[retriever, retriever_bm25],
     weights=[0.5, 0.5]  # Vector:BM25 = 5:5
 )
 ```
 
-#### **Step 4: 문서 포맷팅**
+#### **Step 4: 문서 포맷팅 (format_docs 함수)**
 ```python
 def format_docs(docs):
+    """검색된 문서를 XML 형식으로 포맷팅"""
     formatted = []
     for doc in docs:
         metadata = doc.metadata
@@ -571,10 +615,12 @@ def format_docs(docs):
     return "\n\n".join(formatted)
 ```
 
-#### **Step 5: LLM 답변 생성**
+#### **Step 5: LLM 답변 생성 (get_rag_prompt 함수)**
 ```python
-prompt = ChatPromptTemplate.from_messages([
-    ("system", """
+def get_rag_prompt():
+    """RAG 답변 생성용 프롬프트 템플릿"""
+    return ChatPromptTemplate.from_messages([
+        ("system", """
 당신은 반려견 질병·증상에 대해 수의학 정보를 제공하는 AI 어시스턴트입니다.
 당신의 답변은 반드시 제공된 문맥(Context)만을 기반으로 해야 합니다.
 
@@ -590,12 +636,13 @@ prompt = ChatPromptTemplate.from_messages([
 - 집에서 관리 방법:
 - 병원 방문 시기:
 - 출처(참고한 모든 문서)
-    """),
-    ("human", "문맥: {context}\n\n사용자 질문: {question}")
-])
+        """),
+        ("human", "문맥: {context}\n\n사용자 질문: {question}")
+    ])
 
-llm = ChatOpenAI(model="gpt-4.1", temperature=0)
-rag_chain = prompt | llm | StrOutputParser()
+# 실행
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+rag_chain = get_rag_prompt() | llm | StrOutputParser()
 
 answer = rag_chain.invoke({
     "context": formatted_context, 
@@ -603,7 +650,23 @@ answer = rag_chain.invoke({
 })
 ```
 
-#### **Step 6: 결과 출력 예시**
+#### **Step 6: 사용된 문서 필터링 (filter_docs_by_response 함수)**
+```python
+def filter_docs_by_response(docs, response):
+    """답변에 실제로 사용된 문서만 필터링"""
+    used_docs = []
+    response_lower = response.lower()
+    
+    for doc in docs:
+        # 문서 내용의 일부가 답변에 포함되어 있는지 확인
+        content_snippets = doc.page_content[:100].lower()
+        if any(snippet in response_lower for snippet in content_snippets.split()):
+            used_docs.append(doc)
+    
+    return used_docs if used_docs else docs  # 없으면 전체 반환
+```
+
+#### **Step 7: 결과 출력 예시**
 ```
 상태 요약:
 보호자님의 강아지가 갑자기 구토 증상을 보이며, 며칠 전부터 식욕 저하와 
@@ -639,94 +702,120 @@ answer = rag_chain.invoke({
 
 ### **주요 화면 구성**
 
-#### 1. **메인 대화 화면**
+#### 1. **2열 레이아웃: 문서 + 채팅**
 ```python
 import streamlit as st
 
-st.title("🐕 강아지 건강 상담 챗봇")
-st.caption("반려견의 증상을 입력하시면 AI가 수의학 정보를 제공합니다.")
+st.title("🐕 반려견 건강 상담 ChatBot")
+st.caption("궁금한 반려견 건강 증상에 대해 물어보세요.")
 
-# 채팅 인터페이스
-user_input = st.chat_input("증상이나 궁금한 점을 입력해주세요...")
+# 2열 레이아웃: 왼쪽(문서) - 오른쪽(채팅)
+col_docs, col_chat = st.columns([1, 2], gap="large")
 
-if user_input:
-    with st.chat_message("user"):
-        st.write(user_input)
+with col_chat:
+    st.markdown("### 💬 대화")
     
-    with st.chat_message("assistant"):
-        with st.spinner("답변을 생성하고 있습니다..."):
-            # Query Rewriting
-            transformed = rewrite_chain.invoke({'question': user_input})
-            
-            # Document Retrieval
-            docs = retriever_ensemble.invoke(transformed)
-            context = format_docs(docs)
-            
-            # Answer Generation
-            answer = rag_chain.invoke({
-                "context": context, 
-                "question": transformed
-            })
-            
-            st.write(answer)
+    # 채팅 메시지 표시 (사용자/AI 구분)
+    for message in st.session_state.chat_messages:
+        if message["role"] == "user":
+            # 노란색 배경, 오른쪽 정렬
+            st.markdown(f"<div style='background-color: #FFF9E6;'>{message['content']}</div>")
+        else:
+            # 회색 배경, 왼쪽 정렬
+            st.markdown(f"<div style='background-color: #F0F4F8;'>{message['content']}</div>")
+    
+    # 입력 폼
+    with st.form(key=f"chat_form_{st.session_state.submit_count}"):
+        user_input = st.text_input("증상을 입력하세요...")
+        submitted = st.form_submit_button("➤ 전송")
+
+with col_docs:
+    st.markdown("### 📚 참고 문서")
+    
+    # 최근 AI 응답의 문서 표시
+    if last_ai_message_idx in st.session_state.message_docs:
+        docs = st.session_state.message_docs[last_ai_message_idx]
+        for doc_idx, doc in enumerate(docs, 1):
+            with st.expander(f"문서 {doc_idx}"):
+                st.markdown(f"**출처**: {doc.metadata['title']}")
+                st.markdown(f"**내용**: {doc.page_content[:200]}...")
 ```
 
-#### 2. **검색 방식 선택 사이드바**
+#### 2. **세션 상태 관리**
 ```python
-with st.sidebar:
-    st.header("⚙️ 설정")
-    
-    # 검색 방식 선택
-    search_method = st.selectbox(
-        "검색 방식",
-        ["Similarity", "MMR", "BM25", "Ensemble"],
-        index=3  # 기본값: Ensemble
+# RAG 시스템 캐싱 (한 번만 로드)
+@st.cache_resource
+def load_rag_system():
+    return initialize_rag_system(
+        vectorstore_path=VECTORSTORE_PATH,
+        collection_name=COLLECTION_NAME
     )
-    
-    # 검색 문서 수
-    k = st.slider("검색 문서 수", 3, 10, 5)
-    
-    # MMR 람다 값 (MMR 선택 시에만)
-    if search_method == "MMR":
-        lambda_mult = st.slider(
-            "Lambda (유사도:다양성)", 
-            0.0, 1.0, 0.7, 0.1
-        )
-    
-    # 대화 기록 초기화
-    if st.button("🗑️ 대화 기록 삭제"):
-        st.session_state.messages = []
-        st.rerun()
+
+# 세션 상태 초기화
+if "retriever" not in st.session_state:
+    rag_system = load_rag_system()
+    st.session_state.retriever = rag_system['retriever']
+    st.session_state.llm = rag_system['llm']
+    st.session_state.rag_prompt = get_rag_prompt()
+    st.session_state.rewrite_prompt = get_rewrite_prompt()
+
+if "chat_messages" not in st.session_state:
+    st.session_state.chat_messages = []
+
+if "message_docs" not in st.session_state:
+    st.session_state.message_docs = {}  # {message_idx: [docs]}
 ```
 
-#### 3. **성능 지표 표시**
+#### 3. **메시지 처리 및 문서 필터링**
 ```python
-# 평가 결과 로드
-results_df = pd.read_csv("output/ragas_evaluation_results_openai.csv")
-
-# 검색 방식별 평균 점수
-st.sidebar.subheader("📊 성능 지표")
-
-for method in ["Similarity", "MMR", "BM25", "Ensemble"]:
-    method_data = results_df[results_df['retriever_name'].str.contains(method)]
+if submitted and user_input.strip():
+    # 1. Query Rewriting
+    rewrite_chain = st.session_state.rewrite_prompt | st.session_state.llm | StrOutputParser()
+    transformed_query = rewrite_chain.invoke({"question": user_input})
     
-    if not method_data.empty:
-        st.sidebar.write(f"**{method}**")
-        col1, col2 = st.sidebar.columns(2)
+    # 2. 문서 검색
+    docs = st.session_state.retriever.invoke(transformed_query)
+    
+    if not docs:
+        ai_response = "관련 정보를 찾을 수 없습니다."
+        docs_to_save = []
+    else:
+        # 3. 문서 포맷팅
+        context = format_docs(docs)
         
-        with col1:
-            st.metric("Faithfulness", 
-                     f"{method_data['faithfulness'].mean():.3f}")
-        with col2:
-            st.metric("Answer Rel.", 
-                     f"{method_data['answer_relevancy'].mean():.3f}")
+        # 4. RAG 답변 생성
+        rag_chain = st.session_state.rag_prompt | st.session_state.llm | StrOutputParser()
+        ai_response = rag_chain.invoke({"context": context, "question": transformed_query})
+        
+        # 5. 답변에 실제로 사용된 문서만 필터링
+        docs_to_save = filter_docs_by_response(docs, ai_response)
+    
+    # 6. 메시지 저장
+    message_idx = len(st.session_state.chat_messages)
+    st.session_state.chat_messages.append({
+        "role": "assistant",
+        "content": ai_response
+    })
+    
+    # 7. 문서 저장 (해당 메시지 인덱스에 매핑)
+    if docs_to_save:
+        st.session_state.message_docs[message_idx] = docs_to_save
+```
+
+#### 4. **대화 초기화**
+```python
+if st.button("🗑️ 대화 초기화"):
+    st.session_state.chat_messages = []
+    st.session_state.message_docs = {}
+    st.rerun()
 ```
 
 ### **UI 특징**
 - 💬 **실시간 채팅 인터페이스**: 직관적인 대화형 UI
-- ⚙️ **사용자 맞춤 설정**: 검색 방식, 문서 수, MMR 파라미터 조절
-- 📊 **성능 지표 시각화**: 각 검색 방식의 RAGAS 점수 실시간 표시
-- 💾 **대화 기록 관리**: 세션 기반 대화 이력 유지
+- 📚 **동적 문서 표시**: 각 AI 답변마다 실제 사용된 문서만 표시
+- 🎨 **사용자/AI 메시지 구분**: 색상과 정렬로 명확히 구분
+- 💾 **세션 기반 대화 관리**: 대화 이력 및 관련 문서 유지
+- 🔄 **Form Key 동적 변경**: submit_count로 입력창 자동 초기화
 
 ---
 
@@ -819,7 +908,7 @@ result = evaluate(
         faithfulness,
         answer_relevancy,
     ],
-    llm=ChatOpenAI(model="gpt-4.1"),
+    llm=ChatOpenAI(model="gpt-4o-mini"),
     embeddings=ragas_embeddings,
 )
 
@@ -881,18 +970,16 @@ results_df = result.to_pandas()
 
 ### 🧠 AI / ML
 ![LangChain](https://img.shields.io/badge/LangChain-000000?style=flat&logo=chainlink&logoColor=white)
-![GPT-4](https://img.shields.io/badge/GPT--4.1-412991?style=flat&logo=openai&logoColor=white)
+![GPT-4o-mini](https://img.shields.io/badge/GPT--4o--mini-412991?style=flat&logo=openai&logoColor=white)
 ![OpenAI Embeddings](https://img.shields.io/badge/Embeddings-text--embedding--3--small-00A67E?style=flat&logo=openai&logoColor=white)
 ![BGE-M3](https://img.shields.io/badge/BGE--M3-BAAI-FF6B6B?style=flat)
 ![RAGAS](https://img.shields.io/badge/RAGAS-Evaluation-9B59B6?style=flat)
 
 ### 🗂️ Vector Database
 ![ChromaDB](https://img.shields.io/badge/ChromaDB-FF5A1F?style=flat&logo=databricks&logoColor=white)
-![HNSW](https://img.shields.io/badge/HNSW-005BBB?style=flat&logo=elastic&logoColor=white)
 
 ### 🔍 검색 알고리즘
 ![Similarity Search](https://img.shields.io/badge/Similarity_Search-333333?style=flat&logo=google&logoColor=white)
-![MMR](https://img.shields.io/badge/MMR-6A5ACD?style=flat&logo=replit&logoColor=white)
 ![BM25](https://img.shields.io/badge/BM25-0B72B9?style=flat&logo=apache%20solr&logoColor=white)
 ![Ensemble](https://img.shields.io/badge/Ensemble-444444?style=flat&logo=codecov&logoColor=white)
 
@@ -935,18 +1022,17 @@ LANGSMITH_API_KEY=your_langsmith_key_here  # (선택) 모니터링용
 
 ```bash
 # Step 1: 데이터 전처리
-cd scripts
 python preprocessing.py
-# → data/chunked_docs.pkl 생성
+# → ../data/chunked_docs.pkl 생성
 
 # Step 2: 벡터스토어 구축 (OpenAI)
 python vectorstore_openai.py
-# → data/ChromaDB_openai/ 생성
+# → ../data/ChromaDB_openai/ 생성
 # 예상 소요 시간: 10-15분
 
 # Step 3: 벡터스토어 구축 (BGE-M3, 선택)
 python vectorstore_bge_m3.py
-# → data/ChromaDB_bge_m3/ 생성
+# → ../data/ChromaDB_bge_m3/ 생성
 # 예상 소요 시간: 20-30분
 ```
 
@@ -956,11 +1042,11 @@ python vectorstore_bge_m3.py
 # OpenAI 벡터스토어 기반 테스트셋
 python make_testset.py
 # VECTORSTORE_TYPE="openai" 설정 확인
-# → output/pet_test_dataset_openai.csv 생성
+# → ../output/pet_test_dataset_openai.csv 생성
 
 # BGE-M3 벡터스토어 기반 테스트셋 (선택)
 # make_testset.py에서 VECTORSTORE_TYPE="bge_m3"로 변경 후 실행
-# → output/pet_test_dataset_bge_m3.csv 생성
+# → ../output/pet_test_dataset_bge_m3.csv 생성
 ```
 
 ### **4. 성능 평가 실행**
@@ -968,41 +1054,20 @@ python make_testset.py
 ```bash
 # OpenAI 모델 평가
 python evaluate_openai.py
-# → output/ragas_evaluation_results_openai.csv 생성
+# → ../output/ragas_evaluation_results_openai.csv 생성
 # 예상 소요 시간: 5-10분
 
 # BGE-M3 모델 평가 (선택)
 python evaluate_bge_m3.py
-# → output/ragas_evaluation_results_bge_m3.csv 생성
+# → ../output/ragas_evaluation_results_bge_m3.csv 생성
 # 예상 소요 시간: 10-15분
 ```
 
-### **5. 질의응답 테스트**
-
-```bash
-# 터미널에서 직접 테스트
-python prompt_new.py
-
-# 결과 예시:
-=== 앙상블 검색(Ensemble Search) 결과 ===
-------------------------------
-원본 query : 강아지가 구토를 해요
-
-transformed query (핵심 키워드 추출) : 강아지 구토 증상
-
-답변: 
-- 상태 요약: ...
-- 가능한 원인: ...
-- 집에서 관리 방법: ...
-- 병원 방문 시기: ...
-- 출처: ...
-```
-
-### **6. Streamlit UI 실행**
+### **5. Streamlit UI 실행**
 
 ```bash
 # Streamlit 앱 실행
-streamlit run app.py
+streamlit run streamlit_app.py
 
 # 브라우저에서 http://localhost:8501 접속
 ```
@@ -1089,15 +1154,6 @@ streamlit run app.py
 
 이 프로젝트는 교육 목적으로 제작되었으며, 실제 의료 조언을 대체할 수 없습니다.  
 **반려동물의 건강에 문제가 있다면 반드시 수의사와 상담하세요.**
-
----
-
-## 📞 문의
-
-프로젝트 관련 문의사항이 있으시면 다음으로 연락주세요:
-
-- **GitHub Issues**: [이슈 등록하기](https://github.com/your-repo/issues)
-- **이메일**: your-email@example.com
 
 ---
 
