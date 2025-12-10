@@ -254,9 +254,6 @@ retriever_ensemble = EnsembleRetriever(
     weights=[0.5, 0.5]  # 가중치 합은 1이어야 합니다.
 )   
 retriever_dict = {
-    "유사도 검색(Similarity Search)": retriever,
-    "MMR 검색(MMR Search)": retriever_mmr,
-    "BM25 검색(BM25 Search)": retriever_bm25,
     "앙상블 검색(Ensemble Search)": retriever_ensemble
 }
 rewrite_chain =  rewrite_prompt | llm | StrOutputParser()

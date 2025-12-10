@@ -25,7 +25,7 @@ embedding_model = OpenAIEmbeddings(model="text-embedding-3-large")
 
 # 2. 벡터스토어 설정 - ChromaDB 벡터스토어 선택
 # 옵션: "bge_m3" 또는 "openai"
-VECTORSTORE_TYPE = "openai"  # "bge_m3" 또는 "openai" 선택
+VECTORSTORE_TYPE = "bge_m3"  # "bge_m3" 또는 "openai" 선택
 
 # 프로젝트 루트 경로 (스크립트 위치 기준)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -42,6 +42,7 @@ print("="*60)
 
 all_contexts = []
 MIN_CONTEXT_LEN = 200
+NUM_CONTEXTS = 50  # 생성할 질문 개수
 
 for store_dir in VECTOR_STORE_DIRS:
     try:
@@ -83,9 +84,9 @@ for store_dir in VECTOR_STORE_DIRS:
         docs = vector_store._collection.get(include=['documents'])['documents']
         contexts = [doc for doc in docs if len(doc) > MIN_CONTEXT_LEN]
         random.shuffle(contexts)
-        # 10개 추출
-        all_contexts.extend(contexts[:10])
-        print(f"✓ {store_dir}: {min(10, len(contexts))}개 context 추출 (총 {collection_count}개 문서)")
+        # 50개 추출
+        all_contexts.extend(contexts[:NUM_CONTEXTS])
+        print(f"✓ {store_dir}: {min(NUM_CONTEXTS, len(contexts))}개 context 추출 (총 {collection_count}개 문서)")
     except Exception as e:
         print(f"✗ {store_dir} 추출 실패: {str(e)}")
         import traceback
@@ -208,10 +209,10 @@ for idx, row in eval_df.iterrows():
         print(f"정답: {reference_text}")
 
 # 11. JSON 형식으로도 저장
-json_filename = os.path.join(output_dir, f"pet_test_dataset_{VECTORSTORE_TYPE}.json")
-with open(json_filename, 'w', encoding='utf-8') as f:
-    json.dump(data_for_df, f, ensure_ascii=False, indent=2)
-print(f"✓ JSON 형식으로도 저장되었습니다: {json_filename}")
+# json_filename = os.path.join(output_dir, f"pet_test_dataset_{VECTORSTORE_TYPE}.json")
+# with open(json_filename, 'w', encoding='utf-8') as f:
+#     json.dump(data_for_df, f, ensure_ascii=False, indent=2)
+# print(f"✓ JSON 형식으로도 저장되었습니다: {json_filename}")
 
 print("\n" + "="*60)
 print("✅ 작업 완료!")
