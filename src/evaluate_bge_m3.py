@@ -264,17 +264,22 @@ rag_chain = prompt | llm | StrOutputParser()
 
 
 
-# RAGAS 평가를 위한 데이터 수집
+# RAGAS 평가를 위한 데이터 수집 (배치 처리 방식)
 evaluation_results = []
 
+# 배치 크기 설정 (타임아웃 방지)
+BATCH_SIZE = 5  # 한 번에 5개씩 평가 (필요시 조정: 2-10 범위 권장)
+
 for name, temp_retriever in retriever_dict.items():
+    print(f"\n=== {name} RAGAS 평가 시작 ===\n")
+    
     # 평가를 위한 데이터 준비
     questions = []
     answers = []
     contexts_list = []
     transformed_queries = []
     
-    for i, q in enumerate[Any](query):
+    for i, q in enumerate(query):
         docs = temp_retriever.invoke(q)
         context = format_docs(docs)
         
@@ -288,65 +293,81 @@ for name, temp_retriever in retriever_dict.items():
         contexts_list.append([doc.page_content for doc in docs])
         transformed_queries.append(transformed)
     
-    # RAGAS 평가 수행
-    print(f"\n=== {name} RAGAS 평가 시작 ===\n")
+    # 배치 단위로 평가 수행
+    batch_results = []
+    total_batches = (len(questions) - 1) // BATCH_SIZE + 1
     
-    # Dataset 생성 (RAGAS 형식에 맞춤)
-    # 4대 지표 계산을 위해 reference(ground truth) 추가
-    # RAGAS는 다음 컬럼명을 사용합니다:
-    # user_input(질문), response(답변), retrieved_contexts(검색된 문서), reference(정답)
-    dataset_dict = {
-        "user_input": questions,
-        "response": answers,
-        "retrieved_contexts": contexts_list,
-        "reference": ground_truths,  # context_recall, context_precision 계산에 필요
-    }
+    for batch_idx in range(0, len(questions), BATCH_SIZE):
+        batch_end = min(batch_idx + BATCH_SIZE, len(questions))
+        batch_num = batch_idx // BATCH_SIZE + 1
+        
+        print(f"  [{batch_num}/{total_batches}] 배치 평가 중... (질문 {batch_idx+1}-{batch_end})")
+        
+        # 배치 데이터 준비
+        batch_dataset_dict = {
+            "user_input": questions[batch_idx:batch_end],
+            "response": answers[batch_idx:batch_end],
+            "retrieved_contexts": contexts_list[batch_idx:batch_end],
+            "reference": ground_truths[batch_idx:batch_end],
+        }
+        
+        batch_dataset = Dataset.from_dict(batch_dataset_dict)
+        
+        try:
+            # RAGAS 평가 실행 - 4대 지표 모두 포함
+            # context_recall: 검색된 컨텍스트가 ground truth를 얼마나 포함하는지
+            # context_precision: 검색된 컨텍스트가 얼마나 관련성이 있는지
+            # answer_relevancy: 답변이 질문과 관련이 있는지
+            # faithfulness: 답변이 컨텍스트에 기반하는지 (할루시네이션 방지)
+            result = evaluate(
+                dataset=batch_dataset,
+                metrics=[
+                    context_recall,      # 검색된 문서의 recall
+                    context_precision,   # 검색된 문서의 precision
+                    faithfulness,        # 답변이 컨텍스트에 기반하는지
+                    answer_relevancy,    # 답변이 질문과 관련이 있는지
+                ],
+                llm=llm,                # LLM을 evaluate 함수에 전달
+                embeddings=ragas_embeddings,  # Embeddings를 evaluate 함수에 전달
+            )
+            
+            # 결과를 DataFrame으로 변환
+            batch_results_df = result.to_pandas()
+            batch_results.append(batch_results_df)
+            print(f"  ✓ 배치 {batch_num} 완료")
+            
+        except Exception as e:
+            print(f"  ⚠️  배치 {batch_num} 평가 중 오류 발생: {str(e)}")
+            continue
     
-    dataset = Dataset.from_dict(dataset_dict)
-    
-    # RAGAS 평가 실행 - 4대 지표 모두 포함
-    # context_recall: 검색된 컨텍스트가 ground truth를 얼마나 포함하는지
-    # context_precision: 검색된 컨텍스트가 얼마나 관련성이 있는지
-    # answer_relevancy: 답변이 질문과 관련이 있는지
-    # faithfulness: 답변이 컨텍스트에 기반하는지 (할루시네이션 방지)
-    result = evaluate(
-        dataset=dataset,
-        metrics=[
-            context_recall,      # 검색된 문서의 recall
-            context_precision,   # 검색된 문서의 precision
-            faithfulness,        # 답변이 컨텍스트에 기반하는지
-            answer_relevancy,    # 답변이 질문과 관련이 있는지
-        ],
-        llm=llm,                # LLM을 evaluate 함수에 전달
-        embeddings=ragas_embeddings,  # Embeddings를 evaluate 함수에 전달
-    )
-    
-    # 결과를 DataFrame으로 변환
-    results_df = result.to_pandas()
-    
-    # 추가 정보 추가
-    results_df['retriever_name'] = name
-    results_df['original_question'] = questions
-    results_df['transformed_query'] = transformed_queries
-    results_df['answer'] = answers
-    
-    # 컬럼 순서 재정렬 - RAGAS 4대 지표 포함
-    column_order = [
-        'retriever_name',
-        'original_question',
-        'transformed_query',
-        'answer',
-        'context_recall',      # RAGAS 4대 지표 1
-        'context_precision',   # RAGAS 4대 지표 2
-        'faithfulness',        # RAGAS 4대 지표 3
-        'answer_relevancy',    # RAGAS 4대 지표 4
-    ]
-    
-    # 존재하는 컬럼만 선택
-    available_columns = [col for col in column_order if col in results_df.columns]
-    results_df = results_df[available_columns]
-    
-    evaluation_results.append(results_df)
+    # 모든 배치 결과 합치기
+    if batch_results:
+        results_df = pd.concat(batch_results, ignore_index=True)
+        
+        # 추가 정보 추가
+        results_df['retriever_name'] = name
+        results_df['original_question'] = questions
+        results_df['transformed_query'] = transformed_queries
+        results_df['answer'] = answers
+        
+        # 컬럼 순서 재정렬 - RAGAS 4대 지표 포함
+        column_order = [
+            'retriever_name',
+            'original_question',
+            'transformed_query',
+            'answer',
+            'context_recall',      # RAGAS 4대 지표 1
+            'context_precision',   # RAGAS 4대 지표 2
+            'faithfulness',        # RAGAS 4대 지표 3
+            'answer_relevancy',    # RAGAS 4대 지표 4
+        ]
+        
+        # 존재하는 컬럼만 선택
+        available_columns = [col for col in column_order if col in results_df.columns]
+        results_df = results_df[available_columns]
+        
+        evaluation_results.append(results_df)
+        print(f"✓ {name} 평가 완료")
 
 # 모든 결과를 하나의 DataFrame으로 합치기
 if evaluation_results:
