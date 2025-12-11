@@ -133,7 +133,9 @@
 ## 🏗️ 시스템 아키텍처
 
 
-![system_architecture_icon_style_1](https://github.com/user-attachments/assets/aae18ba0-f041-4a23-a92c-fb38ae8d6d6b)
+![시스템_아키텍처_파스텔_1](https://github.com/user-attachments/assets/a9b314a1-b726-4938-80fb-418a53e88024)
+
+
 
 
 
