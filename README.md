@@ -49,7 +49,7 @@
 
 ### **주요 특징**
 - 📚 **30,000+ 건의 수의학 데이터** 기반 정확한 답변
-- 🔍 **하이브리드 검색 시스템** (Similarity + BM25 + Ensemble(Simlilarity + BM25))
+- 🔍 **하이브리드 검색 시스템** (Ensemble(Simlilarity + BM25))
 - 🎯 **RAGAS 기반 성능 평가** (4가지 메트릭으로 객관적 품질 측정)
 - 💬 **Streamlit 기반 직관적인 UI**
 - 🤖 **다중 임베딩 모델 비교** (OpenAI vs BGE-M3)
