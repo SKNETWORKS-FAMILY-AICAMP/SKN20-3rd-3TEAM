@@ -212,6 +212,7 @@ for doc in docs:
     chunked_docs.extend(chunks)
 
 
+
 print(f" 최종 청킹 결과: {len(chunked_docs)}개 Document")
 # 청킹 파일 저장
 
