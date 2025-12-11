@@ -144,33 +144,36 @@ def show_chat():
     with col_chat:
         st.markdown("### 💬 대화")
         
-        # 채팅 메시지 표시
-        for idx, message in enumerate(st.session_state.chat_messages):
-            if message["role"] == "user":
-                # 사용자 메시지 (오른쪽, 노란색)
-                st.markdown(
-                    f"""
-                    <div style="display: flex; justify-content: flex-end; margin-bottom: 16px;">
-                        <div style="background-color: #FFF9E6; padding: 14px 18px; border-radius: 16px; max-width: 80%; word-wrap: break-word;">
-                            <span style="color: #333; font-size: 15px; line-height: 1.5;">{message['content']}</span>
+        # 채팅 메시지 표시 - 스크롤 가능한 컨테이너
+        chat_container = st.container(height=500, border=True)
+        
+        with chat_container:
+            for idx, message in enumerate(st.session_state.chat_messages):
+                if message["role"] == "user":
+                    # 사용자 메시지 (오른쪽, 노란색)
+                    st.markdown(
+                        f"""
+                        <div style="display: flex; justify-content: flex-end; margin-bottom: 16px;">
+                            <div style="background-color: #FFF9E6; padding: 14px 18px; border-radius: 16px; max-width: 80%; word-wrap: break-word;">
+                                <span style="color: #333; font-size: 15px; line-height: 1.5;">{message['content']}</span>
+                            </div>
                         </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            else:
-                # AI 메시지 (왼쪽, 흰색)
-                st.markdown(
-                    f"""
-                    <div style="display: flex; justify-content: flex-start; margin-bottom: 16px;">
-                        <div style="background-color: #F0F4F8; padding: 14px 18px; border-radius: 16px; max-width: 80%; word-wrap: break-word;">
-                            <strong style="color: #1e40af; font-size: 13px;">🐶 수의사 AI</strong><br>
-                            <span style="color: #333; font-size: 14px; line-height: 1.6; margin-top: 6px; display: block;">{message['content']}</span>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                else:
+                    # AI 메시지 (왼쪽, 흰색)
+                    st.markdown(
+                        f"""
+                        <div style="display: flex; justify-content: flex-start; margin-bottom: 16px;">
+                            <div style="background-color: #F0F4F8; padding: 14px 18px; border-radius: 16px; max-width: 80%; word-wrap: break-word;">
+                                <strong style="color: #1e40af; font-size: 13px;">🐶 수의사 AI</strong><br>
+                                <span style="color: #333; font-size: 14px; line-height: 1.6; margin-top: 6px; display: block;">{message['content']}</span>
+                            </div>
                         </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+                        """,
+                        unsafe_allow_html=True
+                    )
         
         # 입력 폼
         st.markdown("---")

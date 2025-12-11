@@ -33,38 +33,49 @@ print("LangSmith 연결 완료")
 # ---------------------------
 
 def get_retriever(vectorstore, k=5):
-    """앙상블 리트리버 생성
-    Args:
-        vectorstore (Chroma): 벡터스토어 인스턴스
-        user_query (str): 사용자 질의
-        k (int, optional): 검색할 문서 수. Defaults to 5.
-    """
+    """앙상블 리트리버 생성"""
     
-    # 1 벡터 스토어 리트리버 (유사도 기반)
-    vector_retriever = vectorstore.as_retriever(
-        search_kwargs={
-            "k": k #문서 5개
-        },
-        search_type="similarity" #유사도 검색
-    )
+    # 기본 리트리버
+    retriever = vectorstore.as_retriever(search_kwargs={"k": k}, search_type="similarity")
+    
+    # BM25 리트리버 생성
 
-    # 임베딩 하지 않은 상태의 파일 로드(BM25용)
-    with open(r"..\data\chunked_docs.pkl", "rb") as f:
-        docs = pickle.load(f)
-
-    # 2) BM25Retriever (키워드 기반)
-    # BM25는 메타데이터 필터가 지원되지 않으므로 설정하지 않음
-    bm25 = BM25Retriever.from_documents(docs, k=k) #문서 5개
-
+    # BM25 전용 문서 로드 (벡터스토어의 임베딩을 Document로 변환 - BM25는 텍스트 기반이므로)
+    collection = vectorstore._collection
+    doc_count = collection.count()
+    
+    if doc_count == 0:
+        raise ValueError("벡터스토어가 비어있습니다.")
+    
+    # ChromaDB에서 모든 문서 가져오기
+    all_data = collection.get(limit=doc_count)
+    
+    # Document 객체로 변환
+    bm25_docs = []
+    if all_data and 'ids' in all_data and len(all_data['ids']) > 0:
+        documents = all_data.get('documents', [])
+        metadatas = all_data.get('metadatas', [])
+        
+        for i, doc_id in enumerate(all_data['ids']):
+            page_content = documents[i] if i < len(documents) else ""
+            metadata = metadatas[i] if i < len(metadatas) else {}
+            bm25_docs.append(Document(page_content=page_content, metadata=metadata))
+    
+    if len(bm25_docs) == 0:
+        raise ValueError("벡터스토어에서 문서를 가져올 수 없습니다.")
+    
+    print(f"BM25 리트리버용 문서 {len(bm25_docs)}개 로드 완료")
+    retriever_bm25 = BM25Retriever.from_documents(bm25_docs)
+    
+    
+    # 기본 리트리버와 BM25를 합쳐
     # 앙상블 리트리버 생성
-    ensemble_retriever = EnsembleRetriever(
-        retrievers=[vector_retriever, bm25],
-        weights=[0.5, 0.5]  # 벡터 검색과 BM25의 가중치 설정
+    retriever_ensemble = EnsembleRetriever(
+        retrievers=[retriever, retriever_bm25],
+        weights=[0.5, 0.5] #가중치
     )
     
-    return ensemble_retriever
-
-
+    return retriever_ensemble
 
 
 # ---------------------------
@@ -131,7 +142,7 @@ def get_rag_prompt():
 
 
 [응답 규칙]
-- 보호자가 작성한 반려견 상태를 2~3문장으로 요약한다. 상태 요약에는 사용자가 제공한 정보만 포함해야 합니다.
+- 보호자가 작성한 질문을 간단히 요약한다.
 - 문맥에서 확인된 가능한 원인을 구체적으로 설명한다. 
   (문맥에 없다면 “문서에 해당 정보가 없습니다”라고 쓴다)
 - 문맥에서 확인된 내용 중 견종이나 나이와 관련된 정보는 두 가지 전부 사용자가 제공한 정보와 일치하지 않는 이상 
